@@ -62,7 +62,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <select id="filter"><option value="all">Rentals and homes for sale</option><option value="rent">Rentals only</option><option value="buy">Homes for sale only</option></select>
 
     <label>Places nearby</label>
-    <div id="cats"></div><label class="chk"><input type="checkbox" id="newsToggle" checked><span class="dot" style="background:#d81b60"></span>News locations</label>
+    <div id="cats"></div><div class="msg err" id="catErr"></div><label class="chk"><input type="checkbox" id="newsToggle" checked><span class="dot" style="background:#d81b60"></span>News locations</label>
 
     <label>Areas to avoid</label>
     <label class="chk"><input type="checkbox" id="zoneToggle" checked> Show areas I marked</label>
@@ -163,7 +163,7 @@ const CATS={
   fire:{label:'Fire stations',color:'#ef6c00',q:'["amenity"="fire_station"]'}
 };
 $('#cats').innerHTML=Object.entries(CATS).map(([k,c])=>`<label class="chk"><input type="checkbox" data-cat="${k}"><span class="dot" style="background:${c.color}"></span>${c.label}<span class="msg" id="st_${k}" style="margin:0 0 0 auto"></span></label>`).join('');
-const PLACE_ENDPOINTS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+const PLACE_ENDPOINTS=['https://overpass-api.de/api/interpreter','https://lz4.overpass-api.de/api/interpreter','https://z.overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 let placesPromise=null;
 function classify(t){
   if(t.amenity==='place_of_worship'&&t.religion==='christian')return 'church';
@@ -173,48 +173,50 @@ function classify(t){
   if(t.amenity==='police')return 'police';
   if(t.amenity==='fire_station')return 'fire';
 }
-/* Tries each server, giving up on any server that takes longer than 20 seconds */
-function overpass(q){
-  return (async()=>{
-    const errs=[];
-    for(const url of PLACE_ENDPOINTS){
-      const ctrl=new AbortController();
-      const timer=setTimeout(()=>ctrl.abort(),20000);
-      try{
-        const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),signal:ctrl.signal});
-        clearTimeout(timer);
-        if(r.ok)return await r.json();
-        errs.push(url+': HTTP '+r.status);
-      }catch(e){clearTimeout(timer);errs.push(url+': '+e.message)}
-    }
-    console.error('Place data requests all failed:',errs);
-    throw new Error('places');
-  })();
+/* Tries each server in turn (30s limit each) and records why each one failed */
+async function overpass(q){
+  const errs=[];
+  for(const url of PLACE_ENDPOINTS){
+    const host=new URL(url).host,ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),30000);
+    try{
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctrl.signal});
+      clearTimeout(timer);
+      if(!r.ok){errs.push(host+': HTTP '+r.status);continue}
+      const j=await r.json();
+      if(j.remark&&/error|timed out|out of memory/i.test(j.remark)&&!(j.elements&&j.elements.length)){errs.push(host+': '+j.remark);continue}
+      return j;
+    }catch(e){clearTimeout(timer);errs.push(host+': '+(e.name==='AbortError'?'timed out':e.message))}
+  }
+  console.error('Place data requests all failed:',errs);
+  const err=new Error('places');err.detail=errs;throw err;
 }
-function fetchPlaces(){
+/* One small query per category, so one slow server response no longer takes all six down */
+function fetchCat(k){
+  const c=CATS[k];
+  if(c.promise)return c.promise;
   const b='(44.58,-63.80,44.76,-63.45)';
-  const q=`[out:json][timeout:25];(nwr["amenity"="place_of_worship"]["religion"="christian"]${b};nwr["shop"="supermarket"]${b};nwr["amenity"~"^(hospital|school|police|fire_station)$"]${b};);out center tags;`;
-  return overpass(q).then(j=>{
-    Object.values(CATS).forEach(c=>{if(c.group)map.removeLayer(c.group)});
-    Object.values(CATS).forEach(c=>c.group=L.layerGroup());
-    j.elements.forEach(e=>{
-      const t=e.tags||{},k=classify(t);if(!k)return;
+  c.promise=overpass(`[out:json][timeout:30];nwr${c.q}${b};out center tags;`).then(j=>{
+    if(c.group)map.removeLayer(c.group);
+    c.group=L.layerGroup();
+    (j.elements||[]).forEach(e=>{
+      const t=e.tags||{};
       const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
       if(lat==null)return;
-      const c=CATS[k];
       L.circleMarker([lat,lon],{radius:5,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.95}).bindTooltip(esc(t.name||c.label)).addTo(c.group);
     });
-    document.querySelectorAll('[data-cat]').forEach(x=>{if(x.checked)CATS[x.dataset.cat].group.addTo(map)});
-  });
+    return c;
+  }).catch(e=>{c.promise=null;throw e});
+  return c.promise;
 }
 document.querySelectorAll('[data-cat]').forEach(cb=>cb.addEventListener('change',async()=>{
-  const k=cb.dataset.cat,c=CATS[k],st=$('#st_'+k);
+  const k=cb.dataset.cat,c=CATS[k],st=$('#st_'+k),ce=$('#catErr');
   if(!cb.checked){if(c.group)map.removeLayer(c.group);st.textContent='';return}
-  if(!placesPromise)placesPromise=fetchPlaces().catch(e=>{placesPromise=null;throw e});
-  st.className='msg';st.textContent='loading…';
-  try{await placesPromise}catch(err){st.className='msg err';st.textContent='failed — tap to retry';cb.title='Open the browser console (View > Developer > JavaScript Console) for the exact error';cb.checked=false;return}
+  ce.textContent='';st.className='msg';st.textContent='loading…';
+  try{await fetchCat(k)}
+  catch(err){st.className='msg err';st.textContent='failed — tick to retry';ce.textContent=c.label+': '+(err.detail||[err.message]).join(' · ');cb.checked=false;return}
   st.className='msg';
-  if(c.group&&cb.checked)c.group.addTo(map);
+  if(cb.checked)c.group.addTo(map);
   st.textContent=c.group.getLayers().length+' found';
 }));
 
