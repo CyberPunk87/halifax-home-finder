@@ -107,6 +107,12 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="msg" id="shareMsg"></div>
     <button class="act alt" id="placesExport">Save places data file (for faster hosting)</button>
     <div class="msg" id="placesMsg">Downloads churches, stores, hospitals, schools and stations once, so a hosted copy of this app loads them instantly.</div>
+    <label style="margin-top:16px">Keep my phone and computer in sync</label>
+    <div class="msg" style="margin-top:0">Saves your homes and areas to a private (unlisted) GitHub Gist and loads them on your other devices automatically. Create a token once, then paste the same one on every device: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Halifax+Home+Finder" target="_blank" rel="noopener">create a token</a> (tick only “gist”, then copy it).</div>
+    <input id="syncTok" type="password" autocomplete="off" placeholder="Paste your GitHub token">
+    <button class="act alt" id="syncSave">Turn on sync</button>
+    <button class="act alt" id="syncNow">Sync now</button>
+    <div class="msg" id="syncMsg"></div>
     <div id="saved"></div>
   </section>
 
@@ -289,7 +295,8 @@ function render(){
   $('#saved').innerHTML=sv.length?sv.map(row).join(''):'<div class="msg">Nothing saved yet. Tap a pin and choose “Save to shortlist”.</div>';
 }
 function goTo(id){const l=listings.find(x=>x.id===id);if(!l)return;if(!markers[id]){$('#filter').value='all';render()}map.flyTo([l.lat,l.lon],16);setTimeout(()=>markers[id]&&markers[id].openPopup(),600)}
-function upd(){store('hx_listings',listings)}
+function upd(){store('hx_listings',listings);touch()}
+function saveZones(){store('hx_zones',zones);touch()}
 function toggleSave(id){const l=listings.find(x=>x.id===id);l.saved=!l.saved;upd();render();markers[id]&&markers[id].openPopup()}
 function setNote(id,v){listings.find(x=>x.id===id).note=v;upd();render();markers[id]&&markers[id].openPopup()}
 function del(id){if(!confirm('Delete this home?'))return;listings=listings.filter(x=>x.id!==id);upd();map.closePopup();render()}
@@ -337,7 +344,7 @@ function drawZones(){
     c.bindPopup(`<b>Area to avoid</b><br>${esc(z.label||'No reason added')}<br><button onclick="delZone('${z.id}')">Remove</button>`);
   });
 }
-function delZone(id){zones=zones.filter(z=>z.id!==id);store('hx_zones',zones);map.closePopup();drawZones()}
+function delZone(id){zones=zones.filter(z=>z.id!==id);saveZones();map.closePopup();drawZones()}
 $('#exportBtn').onclick=()=>{
   const blob=new Blob([JSON.stringify({listings,zones},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
@@ -354,7 +361,7 @@ $('#importFile').onchange=e=>{
       let added=0;
       (data.listings||[]).forEach(l=>{if(!listings.some(x=>x.id===l.id)){listings.push(l);added++}});
       (data.zones||[]).forEach(z=>{if(!zones.some(x=>x.id===z.id))zones.push(z)});
-      upd();store('hx_zones',zones);render();drawZones();
+      upd();saveZones();render();drawZones();
       m.textContent='Added '+added+' new home(s) from that file.';
     }catch(err){m.className='msg err';m.textContent='Couldn’t read that file.'}
   };
@@ -536,7 +543,7 @@ map.on('click',e=>{
   if(mode==='zone'){
     const label=prompt('Why avoid this area? (optional)')||'';
     zones.push({id:'z'+Date.now(),lat:e.latlng.lat,lon:e.latlng.lng,label});
-    store('hx_zones',zones);drawZones();
+    saveZones();drawZones();
     mode=null;$('#zoneBtn').textContent='Mark an area to avoid';map.getContainer().style.cursor='';
   }else if(tab==='add'){setPending(e.latlng.lat,e.latlng.lng,'Location set from the map.')}
 });
@@ -603,6 +610,71 @@ window.addEventListener('hashchange',handleSave);
   if(location.protocol==='file:'){$('#bmMsg').className='msg err';$('#bmMsg').textContent='This copy is opened from a file, so the bookmark can’t send listings back to it. Open your hosted link (the github.io address) and drag the button from there.'}
 })();
 handleSave();
+
+/* ---------- Sync between devices (private GitHub Gist) ---------- */
+const GIST_FILE='halifax-home-finder.json';
+let syncTok='',gistId='',pushTimer=null,syncBusy=false;
+try{syncTok=localStorage.getItem('hx_sync_token')||'';gistId=localStorage.getItem('hx_gist_id')||''}catch(e){}
+$('#syncTok').value=syncTok;
+const localUpdated=()=>{try{return +localStorage.getItem('hx_updated')||0}catch(e){return 0}};
+const setUpdated=n=>{try{localStorage.setItem('hx_updated',String(n))}catch(e){}};
+const ghHead=()=>({Authorization:'Bearer '+syncTok,Accept:'application/vnd.github+json','Content-Type':'application/json'});
+function syncStatus(text,err){const m=$('#syncMsg');m.className=err?'msg err':'msg';m.textContent=text}
+function touch(){setUpdated(Date.now());if(syncTok){clearTimeout(pushTimer);pushTimer=setTimeout(()=>syncNow(true),1500)}}
+async function findGist(){
+  const r=await fetch('https://api.github.com/gists?per_page=100',{headers:ghHead()});
+  if(r.status===401)throw new Error('GitHub rejected the token');
+  if(!r.ok)throw new Error('GitHub error '+r.status);
+  const g=(await r.json()).find(x=>x.files&&x.files[GIST_FILE]);
+  if(g){gistId=g.id;try{localStorage.setItem('hx_gist_id',gistId)}catch(e){}}
+}
+async function pullRemote(){
+  const r=await fetch('https://api.github.com/gists/'+gistId,{headers:ghHead()});
+  if(r.status===401)throw new Error('GitHub rejected the token');
+  if(!r.ok)throw new Error('GitHub error '+r.status);
+  const f=((await r.json()).files||{})[GIST_FILE];
+  if(!f)return null;
+  return JSON.parse(f.truncated?await (await fetch(f.raw_url)).text():f.content);
+}
+async function pushRemote(){
+  const files={[GIST_FILE]:{content:JSON.stringify({listings,zones,updated:localUpdated()})}};
+  const r=gistId
+    ?await fetch('https://api.github.com/gists/'+gistId,{method:'PATCH',headers:ghHead(),body:JSON.stringify({files})})
+    :await fetch('https://api.github.com/gists',{method:'POST',headers:ghHead(),body:JSON.stringify({description:'Halifax Home Finder data',public:false,files})});
+  if(r.status===401)throw new Error('GitHub rejected the token');
+  if(!r.ok)throw new Error('GitHub error '+r.status);
+  if(!gistId){gistId=(await r.json()).id;try{localStorage.setItem('hx_gist_id',gistId)}catch(e){}}
+}
+async function syncNow(quiet){
+  if(!syncTok||syncBusy)return;
+  syncBusy=true;if(!quiet)syncStatus('Syncing…');
+  try{
+    if(!localUpdated()&&(listings.length||zones.length))setUpdated(Date.now());
+    if(!gistId)await findGist();
+    if(gistId){
+      const remote=await pullRemote(),lu=localUpdated();
+      if(remote&&(remote.updated||0)>lu){
+        listings=remote.listings||[];zones=remote.zones||[];
+        store('hx_listings',listings);store('hx_zones',zones);setUpdated(remote.updated);
+        render();drawZones();
+        syncStatus('Loaded the latest from your other device ('+new Date().toLocaleTimeString('en-CA',{timeStyle:'short'})+').');return;
+      }
+      if(remote&&(remote.updated||0)===lu){syncStatus('In sync ('+new Date().toLocaleTimeString('en-CA',{timeStyle:'short'})+').');return}
+    }
+    await pushRemote();
+    syncStatus('Saved to sync ('+new Date().toLocaleTimeString('en-CA',{timeStyle:'short'})+').');
+  }catch(e){console.error('Sync:',e);syncStatus('Sync failed: '+(e.message==='Failed to fetch'?'no connection to GitHub':e.message),true)}
+  finally{syncBusy=false}
+}
+$('#syncSave').onclick=()=>{
+  syncTok=$('#syncTok').value.trim();gistId='';
+  try{localStorage.setItem('hx_sync_token',syncTok);localStorage.removeItem('hx_gist_id')}catch(e){}
+  if(!syncTok){syncStatus('Sync turned off on this device.');return}
+  syncNow(false);
+};
+$('#syncNow').onclick=()=>{if(!syncTok){syncStatus('Paste your token and press “Turn on sync” first.',true);return}syncNow(false)};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncNow(true)});
+if(syncTok)syncNow(true);
 
 /* ---------- News ---------- */
 const GAZ=[
