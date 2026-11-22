@@ -109,7 +109,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="msg" id="placesMsg">Downloads churches, stores, hospitals, schools and stations once, so a hosted copy of this app loads them instantly.</div>
     <label style="margin-top:16px">Keep my phone and computer in sync</label>
     <div class="msg" style="margin-top:0">Saves your homes and areas to a private (unlisted) GitHub Gist and loads them on your other devices automatically. Create a token once, then paste the same one on every device: <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Halifax+Home+Finder" target="_blank" rel="noopener">create a token</a> (tick only “gist”, then copy it).</div>
-    <input id="syncTok" type="password" autocomplete="off" placeholder="Paste your GitHub token">
+    <input id="syncTok" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your GitHub token">
+    <label class="chk"><input type="checkbox" id="syncShow"> Show token</label>
     <button class="act alt" id="syncSave">Turn on sync</button>
     <button class="act alt" id="syncNow">Sync now</button>
     <div class="msg" id="syncMsg"></div>
@@ -663,16 +664,24 @@ async function syncNow(quiet){
     }
     await pushRemote();
     syncStatus('Saved to sync ('+new Date().toLocaleTimeString('en-CA',{timeStyle:'short'})+').');
-  }catch(e){console.error('Sync:',e);syncStatus('Sync failed: '+(e.message==='Failed to fetch'?'no connection to GitHub':e.message),true)}
+  }catch(e){
+    console.error('Sync:',e);
+    let why=e.message==='Failed to fetch'?'no connection to GitHub':e.message;
+    if(/rejected the token/.test(why))why+=' (the token here is '+syncTok.length+' characters and starts with “'+syncTok.slice(0,4)+'”; a classic token is 40 characters and starts with “ghp_”)';
+    syncStatus('Sync failed: '+why,true);
+  }
   finally{syncBusy=false}
 }
 $('#syncSave').onclick=()=>{
-  syncTok=$('#syncTok').value.trim();gistId='';
+  const raw=$('#syncTok').value,found=raw.match(/(github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{36})/);
+  syncTok=found?found[1]:raw.replace(/\s+/g,'');
+  $('#syncTok').value=syncTok;gistId='';
   try{localStorage.setItem('hx_sync_token',syncTok);localStorage.removeItem('hx_gist_id')}catch(e){}
   if(!syncTok){syncStatus('Sync turned off on this device.');return}
   syncNow(false);
 };
 $('#syncNow').onclick=()=>{if(!syncTok){syncStatus('Paste your token and press “Turn on sync” first.',true);return}syncNow(false)};
+$('#syncShow').onchange=e=>{$('#syncTok').type=e.target.checked?'text':'password'};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncNow(true)});
 if(syncTok)syncNow(true);
 
