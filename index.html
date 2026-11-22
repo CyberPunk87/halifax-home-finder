@@ -104,6 +104,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <input type="file" id="importFile" accept=".json" style="display:none">
     <button class="act alt" id="importBtn">Load a file someone shared with me</button>
     <div class="msg" id="shareMsg"></div>
+    <button class="act alt" id="placesExport">Save places data file (for faster hosting)</button>
+    <div class="msg" id="placesMsg">Downloads churches, stores, hospitals, schools and stations once, so a hosted copy of this app loads them instantly.</div>
     <div id="saved"></div>
   </section>
 
@@ -174,11 +176,11 @@ function classify(t){
   if(t.amenity==='fire_station')return 'fire';
 }
 /* Tries each server in turn (30s limit each) and records why each one failed */
-async function overpass(q){
+async function overpass(q,ms=30000){
   const errs=[];
   for(const url of PLACE_ENDPOINTS){
     const host=new URL(url).host,ctrl=new AbortController();
-    const timer=setTimeout(()=>ctrl.abort(),30000);
+    const timer=setTimeout(()=>ctrl.abort(),ms);
     try{
       const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q),signal:ctrl.signal});
       clearTimeout(timer);
@@ -191,24 +193,56 @@ async function overpass(q){
   console.error('Place data requests all failed:',errs);
   const err=new Error('places');err.detail=errs;throw err;
 }
-/* One small query per category, so one slow server response no longer takes all six down */
+/* Places come from a places.json saved next to this page when there is one (fast, no outside server),
+   and otherwise from OpenStreetMap's Overpass servers, one small query per category */
+let staticP=null;
+const staticPlaces=()=>staticP||(staticP=fetch('places.json').then(r=>r.ok?r.json():null).catch(()=>null));
+function liveCat(k){
+  const c=CATS[k],b='(44.58,-63.80,44.76,-63.45)';
+  return overpass(`[out:json][timeout:60];nwr${c.q}${b};out center tags;`,65000).then(j=>(j.elements||[]).map(e=>{
+    const t=e.tags||{};
+    return {lat:e.lat!=null?e.lat:(e.center&&e.center.lat),lon:e.lon!=null?e.lon:(e.center&&e.center.lon),name:t.name||''};
+  }).filter(p=>p.lat!=null&&p.lon!=null));
+}
 function fetchCat(k){
   const c=CATS[k];
   if(c.promise)return c.promise;
-  const b='(44.58,-63.80,44.76,-63.45)';
-  c.promise=overpass(`[out:json][timeout:30];nwr${c.q}${b};out center tags;`).then(j=>{
+  c.promise=(async()=>{
+    const sp=await staticPlaces();
+    const pts=(sp&&Array.isArray(sp[k]))?sp[k]:await liveCat(k);
     if(c.group)map.removeLayer(c.group);
     c.group=L.layerGroup();
-    (j.elements||[]).forEach(e=>{
-      const t=e.tags||{};
-      const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
-      if(lat==null)return;
-      L.circleMarker([lat,lon],{radius:5,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.95}).bindTooltip(esc(t.name||c.label)).addTo(c.group);
-    });
+    pts.forEach(p=>L.circleMarker([p.lat,p.lon],{radius:5,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.95}).bindTooltip(esc(p.name||c.label)).addTo(c.group));
     return c;
-  }).catch(e=>{c.promise=null;throw e});
+  })().catch(e=>{c.promise=null;throw e});
   return c.promise;
 }
+$('#placesExport').onclick=async()=>{
+  const m=$('#placesMsg'),btn=$('#placesExport'),keys=Object.keys(CATS),bad=[];
+  let out=load('hx_places_part',{});
+  if(out.built&&Date.now()-new Date(out.built)>864e5)out={};
+  btn.disabled=true;m.className='msg';
+  for(const k of keys){
+    for(let t=1;t<=3&&!Array.isArray(out[k]);t++){
+      m.textContent='Downloading '+CATS[k].label+(t>1?' (try '+t+' of 3)':'')+'…';
+      try{out[k]=await liveCat(k);store('hx_places_part',out)}
+      catch(e){console.error(k,e.detail||e);if(t<3)await new Promise(r=>setTimeout(r,8000))}
+    }
+    if(!Array.isArray(out[k]))bad.push(CATS[k].label);
+  }
+  btn.disabled=false;
+  out.built=new Date().toISOString();store('hx_places_part',out);
+  const url=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:'application/json'}));
+  const total=keys.reduce((n,k)=>n+(Array.isArray(out[k])?out[k].length:0),0);
+  const link=' <a href="'+url+'" download="places.json"><b>Click here to save places.json</b></a>';
+  if(bad.length){
+    m.className='msg err';
+    m.innerHTML='Missing: '+bad.join(', ')+'. You can click again in a few minutes to retry just those, or save what you have now (the hosted app will still look up the missing ones live).'+link;
+    return;
+  }
+  m.className='msg';
+  m.innerHTML='All '+total+' places downloaded.'+link;
+};
 document.querySelectorAll('[data-cat]').forEach(cb=>cb.addEventListener('change',async()=>{
   const k=cb.dataset.cat,c=CATS[k],st=$('#st_'+k),ce=$('#catErr');
   if(!cb.checked){if(c.group)map.removeLayer(c.group);st.textContent='';return}
