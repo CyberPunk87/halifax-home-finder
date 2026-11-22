@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Halifax Home Finder</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--ink:#12263a;--fog:#eef1f2;--panel:#fff;--line:#d5dde1;--rent:#1f8a8a;--buy:#c9962b;--bad:#b3261e;--mute:#5d6f7e}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:14px/1.45 system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--fog);display:grid;grid-template-columns:340px 1fr 300px;grid-template-rows:100%}
+h1,h2{font-family:"Iowan Old Style",Georgia,serif;margin:0}
+h1{font-size:22px;padding:16px 16px 4px}
+.sub{padding:0 16px 10px;color:var(--mute);font-size:12.5px}
+aside{background:var(--panel);display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+#newsbox{border-right:0;border-left:1px solid var(--line)}
+nav{display:flex;border-bottom:1px solid var(--line)}
+nav button{flex:1;padding:10px 4px;border:0;background:none;font:inherit;cursor:pointer;color:var(--mute);border-bottom:3px solid transparent}
+nav button.on{color:var(--ink);font-weight:600;border-color:var(--ink)}
+.pane{display:none;overflow:auto;padding:14px 16px;flex:1}
+.pane.on{display:block}
+label{display:block;margin:8px 0 3px;font-weight:600;font-size:13px}
+input,select,textarea{width:100%;font:inherit;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+button.act{margin-top:10px;padding:8px 12px;border:0;border-radius:6px;background:var(--ink);color:#fff;font:inherit;cursor:pointer}
+button.alt{background:#fff;color:var(--ink);border:1px solid var(--ink)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #6aa9d8;outline-offset:1px}
+.chk{display:flex;align-items:center;gap:8px;margin:5px 0;font-weight:400}
+.chk input{width:auto}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+.msg{margin-top:8px;font-size:13px;color:var(--mute)}
+.err{color:var(--bad)}
+.item{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:10px 0;font:inherit;cursor:pointer;color:inherit}
+.item b{display:block}
+.item span{color:var(--mute);font-size:12.5px}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;font-size:12px;margin-right:6px}
+#map{height:100%;width:100%}
+#news{overflow:auto;padding:0 16px 16px;flex:1}
+.nitem{border-top:1px solid var(--line);padding:11px 0}#news a{display:block;color:inherit;text-decoration:none}.pinbtn{margin-top:6px;padding:4px 9px;font:inherit;font-size:12.5px;border:1px solid #d81b60;color:#d81b60;background:#fff;border-radius:14px;cursor:pointer}
+#news a:hover b{text-decoration:underline}
+#news small{display:block;color:var(--mute);margin-top:2px}
+.leaflet-popup-content{font:13px/1.45 system-ui,sans-serif;min-width:210px}
+.leaflet-popup-content textarea{margin:6px 0}
+.leaflet-popup-content button{margin:4px 6px 0 0;padding:5px 9px;font:inherit;cursor:pointer;border-radius:5px;border:1px solid var(--ink);background:#fff}
+@media (max-width:980px){body{grid-template-columns:1fr;grid-template-rows:auto 60vh auto;height:auto;overflow:auto}aside{max-height:none}#newsbox{border:0}}
+</style>
+</head>
+<body>
+
+<aside>
+  <h1>Halifax Home Finder</h1>
+  <div class="sub">Rent CAD 1,500–2,500 · Buy CAD 150,000–375,000</div>
+  <nav role="tablist">
+    <button class="on" data-tab="explore">Explore</button>
+    <button data-tab="open">Public data</button>
+    <button data-tab="shortlist">Shortlist</button>
+    <button data-tab="add">Add home</button>
+  </nav>
+
+  <section class="pane on" id="explore">
+    <label for="filter">Show</label>
+    <select id="filter"><option value="all">Rentals and homes for sale</option><option value="rent">Rentals only</option><option value="buy">Homes for sale only</option></select>
+
+    <label>Places nearby</label>
+    <div id="cats"></div><label class="chk"><input type="checkbox" id="newsToggle" checked><span class="dot" style="background:#d81b60"></span>News locations</label>
+
+    <label>Areas to avoid</label>
+    <label class="chk"><input type="checkbox" id="zoneToggle" checked> Show areas I marked</label>
+    <button class="act alt" id="zoneBtn">Mark an area to avoid</button>
+    <div class="msg" style="margin-top:10px">Reported incidents and other HRM open data (roads, transit, schools, land use) are in the “Public data” tab.</div>
+    <div class="msg">Click the button, then click the map. Use Halifax Regional Police’s crime map (updated daily) at <a href="https://www.halifax.ca/safety-security/police/crime-mapping" target="_blank" rel="noopener">halifax.ca crime mapping</a> to decide which areas to mark.</div>
+
+    <label>Traffic</label>
+    <div class="msg">No free live traffic feed exists for Halifax. HRM publishes its own traffic counts and studies here: <a href="https://www.halifax.ca/transportation/streets-sidewalks/traffic-data-collection-program" target="_blank" rel="noopener">HRM traffic studies</a>.</div>
+
+    <label>Homes on the map <span id="count"></span></label>
+    <div id="list"></div>
+  </section>
+
+  <section class="pane" id="open">
+    <div class="msg" style="margin-top:0">Live layers from Halifax Regional Municipality’s open data. Tick one to draw it on the map; it downloads the first time you turn it on. Click any feature on the map for its details.</div>
+    <div id="opengroups"></div>
+
+    <label>Public webcams</label>
+    <label class="chk"><input type="checkbox" id="owToggle"><span class="dot" style="background:#6a1b9a"></span>Webcams in view<span class="msg" id="owSt" style="margin:0 0 0 auto"></span></label>
+    <label for="owTok">OpenWebcamDB API key</label>
+    <input id="owTok" type="password" autocomplete="off" placeholder="Paste your key">
+    <button class="act alt" id="owSave">Save key</button>
+    <div class="msg" id="owMsg"></div>
+    <div class="msg">Free for non-commercial use. Zoom in, tick the box, then click a dot for its latest still and a link to watch live. Your key is stored only in this browser. <a href="https://openwebcamdb.com" target="_blank" rel="noopener">Powered by OpenWebcamDB.com</a></div>
+
+    <label>Traffic cameras (Helios, paid account)</label>
+    <label class="chk"><input type="checkbox" id="camToggle"><span class="dot" style="background:#ad1457"></span>Traffic cameras in view<span class="msg" id="camSt" style="margin:0 0 0 auto"></span></label>
+    <label for="camTok">Helios access token</label>
+    <input id="camTok" type="password" autocomplete="off" placeholder="Paste your token">
+    <button class="act alt" id="camSave">Save token</button>
+    <div class="msg" id="camMsg"></div>
+    <div class="msg">Cameras come from the Helios network, which needs an account (contact geospatialinfo@nv5.com). Zoom in to street level, tick the box, then click a camera for its latest image. Your token is stored only in this browser.</div>
+  </section>
+
+  <section class="pane" id="shortlist">
+    <div class="msg">Everything you add is saved only on this computer. To share it with family, send them this same app file plus a copy of your data below — they load it on their own device.</div>
+    <button class="act alt" id="exportBtn">Save my homes &amp; shortlist to a file</button>
+    <input type="file" id="importFile" accept=".json" style="display:none">
+    <button class="act alt" id="importBtn">Load a file someone shared with me</button>
+    <div class="msg" id="shareMsg"></div>
+    <div id="saved"></div>
+  </section>
+
+  <section class="pane" id="add">
+    <label for="kind">This is a</label>
+    <select id="kind"><option value="rent">Rental (per month)</option><option value="buy">Home for sale</option></select>
+    <label for="addr">Street address</label>
+    <input id="addr" placeholder="e.g. 1234 Robie St">
+    <button class="act alt" id="find">Find on map</button>
+    <div class="msg" id="findMsg">You can also click the exact spot on the map.</div>
+    <label for="price">Price (CAD)</label>
+    <input id="price" type="number" inputmode="numeric" placeholder="e.g. 2000">
+    <label for="beds">Bedrooms</label>
+    <input id="beds" placeholder="e.g. 2">
+    <label for="link">Link to the listing</label>
+    <input id="link" placeholder="https://…">
+    <button class="act" id="saveHome">Add to map</button>
+    <div class="msg" id="addMsg"></div>
+  </section>
+</aside>
+
+<main><div id="map"></div></main>
+
+<aside id="newsbox">
+  <h2 style="padding:16px 16px 4px">Latest in Nova Scotia</h2>
+  <div class="sub">Updates every 10 minutes · CBC Nova Scotia</div>
+  <div id="news"><div class="msg" style="padding-top:8px">Loading news…</div></div>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+const store=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+const money=(n,k)=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD',maximumFractionDigits:0}).format(n)+(k==='rent'?'/mo':'');
+const RANGE={rent:[1500,2500],buy:[150000,375000]};
+const COLOR={rent:'#1f8a8a',buy:'#c9962b'};
+
+let listings=load('hx_listings',[]), zones=load('hx_zones',[]);
+let mode=null, pending=null, pendingMarker=null, tab='explore';
+
+/* ---------- Map ---------- */
+const map=L.map('map',{preferCanvas:true}).fitBounds([[44.58,-63.80],[44.76,-63.45]]);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,attribution:'Tiles © Esri'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:16}).addTo(map);
+const homeLayer=L.layerGroup().addTo(map), zoneLayer=L.layerGroup().addTo(map);
+let markers={};
+
+/* ---------- Place layers (live from OpenStreetMap) ---------- */
+const CATS={
+  church:{label:'Churches',color:'#6b4c9a',q:'["amenity"="place_of_worship"]["religion"="christian"]'},
+  grocery:{label:'Grocery stores',color:'#2e7d32',q:'["shop"="supermarket"]'},
+  hospital:{label:'Hospitals',color:'#c62828',q:'["amenity"="hospital"]'},
+  school:{label:'Schools',color:'#1565c0',q:'["amenity"="school"]'},
+  police:{label:'Police stations',color:'#37474f',q:'["amenity"="police"]'},
+  fire:{label:'Fire stations',color:'#ef6c00',q:'["amenity"="fire_station"]'}
+};
+$('#cats').innerHTML=Object.entries(CATS).map(([k,c])=>`<label class="chk"><input type="checkbox" data-cat="${k}"><span class="dot" style="background:${c.color}"></span>${c.label}<span class="msg" id="st_${k}" style="margin:0 0 0 auto"></span></label>`).join('');
+const PLACE_ENDPOINTS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+let placesPromise=null;
+function classify(t){
+  if(t.amenity==='place_of_worship'&&t.religion==='christian')return 'church';
+  if(t.shop==='supermarket')return 'grocery';
+  if(t.amenity==='hospital')return 'hospital';
+  if(t.amenity==='school')return 'school';
+  if(t.amenity==='police')return 'police';
+  if(t.amenity==='fire_station')return 'fire';
+}
+/* Tries each server, giving up on any server that takes longer than 20 seconds */
+function overpass(q){
+  return (async()=>{
+    const errs=[];
+    for(const url of PLACE_ENDPOINTS){
+      const ctrl=new AbortController();
+      const timer=setTimeout(()=>ctrl.abort(),20000);
+      try{
+        const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),signal:ctrl.signal});
+        clearTimeout(timer);
+        if(r.ok)return await r.json();
+        errs.push(url+': HTTP '+r.status);
+      }catch(e){clearTimeout(timer);errs.push(url+': '+e.message)}
+    }
+    console.error('Place data requests all failed:',errs);
+    throw new Error('places');
+  })();
+}
+function fetchPlaces(){
+  const b='(44.58,-63.80,44.76,-63.45)';
+  const q=`[out:json][timeout:25];(nwr["amenity"="place_of_worship"]["religion"="christian"]${b};nwr["shop"="supermarket"]${b};nwr["amenity"~"^(hospital|school|police|fire_station)$"]${b};);out center tags;`;
+  return overpass(q).then(j=>{
+    Object.values(CATS).forEach(c=>{if(c.group)map.removeLayer(c.group)});
+    Object.values(CATS).forEach(c=>c.group=L.layerGroup());
+    j.elements.forEach(e=>{
+      const t=e.tags||{},k=classify(t);if(!k)return;
+      const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
+      if(lat==null)return;
+      const c=CATS[k];
+      L.circleMarker([lat,lon],{radius:5,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.95}).bindTooltip(esc(t.name||c.label)).addTo(c.group);
+    });
+    document.querySelectorAll('[data-cat]').forEach(x=>{if(x.checked)CATS[x.dataset.cat].group.addTo(map)});
+  });
+}
+document.querySelectorAll('[data-cat]').forEach(cb=>cb.addEventListener('change',async()=>{
+  const k=cb.dataset.cat,c=CATS[k],st=$('#st_'+k);
+  if(!cb.checked){if(c.group)map.removeLayer(c.group);st.textContent='';return}
+  if(!placesPromise)placesPromise=fetchPlaces().catch(e=>{placesPromise=null;throw e});
+  st.className='msg';st.textContent='loading…';
+  try{await placesPromise}catch(err){st.className='msg err';st.textContent='failed — tap to retry';cb.title='Open the browser console (View > Developer > JavaScript Console) for the exact error';cb.checked=false;return}
+  st.className='msg';
+  if(c.group&&cb.checked)c.group.addTo(map);
+  st.textContent=c.group.getLayers().length+' found';
+}));
+
+/* ---------- Homes ---------- */
+function popupHtml(l){
+  return `<b>${money(l.price,l.kind)}</b> · ${l.kind==='rent'?'Rental':'For sale'}${l.beds?' · '+esc(l.beds)+' bed':''}<br>${esc(l.addr)}
+  ${l.link?`<br><a href="${esc(l.link)}" target="_blank" rel="noopener">Open original listing</a>`:''}
+  <textarea rows="2" placeholder="Your notes" onchange="setNote('${l.id}',this.value)">${esc(l.note||'')}</textarea>
+  <button onclick="toggleSave('${l.id}')">${l.saved?'Remove from shortlist':'Save to shortlist'}</button><button onclick="del('${l.id}')">Delete</button>`;
+}
+function render(){
+  homeLayer.clearLayers();markers={};
+  const f=$('#filter').value, shown=listings.filter(l=>f==='all'||l.kind===f);
+  shown.forEach(l=>{
+    const m=L.circleMarker([l.lat,l.lon],{radius:11,color:l.saved?'#12263a':'#fff',weight:l.saved?4:2,fillColor:COLOR[l.kind],fillOpacity:1}).addTo(homeLayer);
+    m.bindPopup(()=>popupHtml(l));markers[l.id]=m;
+  });
+  $('#count').textContent=shown.length?'('+shown.length+')':'';
+  const row=l=>`<button class="item" onclick="goTo('${l.id}')"><b><span class="pill" style="background:${COLOR[l.kind]}">${l.kind==='rent'?'Rent':'Buy'}</span>${money(l.price,l.kind)}</b><span>${esc(l.addr)}${l.beds?' · '+esc(l.beds)+' bed':''}</span>${l.note?`<span><br>“${esc(l.note)}”</span>`:''}</button>`;
+  $('#list').innerHTML=shown.length?shown.map(row).join(''):'<div class="msg">No homes yet. Open “Add home” to put your first one on the map.</div>';
+  const sv=listings.filter(l=>l.saved);
+  $('#saved').innerHTML=sv.length?sv.map(row).join(''):'<div class="msg">Nothing saved yet. Tap a pin and choose “Save to shortlist”.</div>';
+}
+function goTo(id){const l=listings.find(x=>x.id===id);if(!l)return;if(!markers[id]){$('#filter').value='all';render()}map.flyTo([l.lat,l.lon],16);setTimeout(()=>markers[id]&&markers[id].openPopup(),600)}
+function upd(){store('hx_listings',listings)}
+function toggleSave(id){const l=listings.find(x=>x.id===id);l.saved=!l.saved;upd();render();markers[id]&&markers[id].openPopup()}
+function setNote(id,v){listings.find(x=>x.id===id).note=v;upd();render();markers[id]&&markers[id].openPopup()}
+function del(id){if(!confirm('Delete this home?'))return;listings=listings.filter(x=>x.id!==id);upd();map.closePopup();render()}
+$('#filter').addEventListener('change',render);
+
+/* ---------- Add a home ---------- */
+function setPending(lat,lon,text){
+  pending={lat,lon};
+  if(pendingMarker)map.removeLayer(pendingMarker);
+  pendingMarker=L.circleMarker([lat,lon],{radius:9,color:'#12263a',weight:3,fillColor:'#fff',fillOpacity:1}).addTo(map);
+  $('#findMsg').className='msg';$('#findMsg').textContent=text;
+}
+$('#find').onclick=async()=>{
+  const a=$('#addr').value.trim();if(!a)return;
+  $('#findMsg').textContent='Searching…';
+  try{
+    const u='https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ca&viewbox=-63.80,44.76,-63.45,44.58&bounded=1&q='+encodeURIComponent(a+', Nova Scotia');
+    const r=await (await fetch(u)).json();
+    if(!r.length){$('#findMsg').className='msg err';$('#findMsg').textContent='Address not found. Click the exact spot on the map instead.';return}
+    setPending(+r[0].lat,+r[0].lon,'Found: '+r[0].display_name.split(',').slice(0,3).join(','));
+    map.flyTo([+r[0].lat,+r[0].lon],16);
+  }catch(e){$('#findMsg').className='msg err';$('#findMsg').textContent='Search failed. Click the exact spot on the map instead.'}
+};
+$('#saveHome').onclick=()=>{
+  const kind=$('#kind').value,price=+$('#price').value,m=$('#addMsg');m.className='msg err';
+  if(!pending){m.textContent='Set the location first: use “Find on map” or click the map.';return}
+  if(!price){m.textContent='Enter a price.';return}
+  const [lo,hi]=RANGE[kind];
+  if(price<lo||price>hi){m.textContent=`Outside your budget: ${money(lo,kind)} to ${money(hi,kind)}.`;return}
+  const id='h'+Date.now();
+  listings.push({id,kind,price,addr:$('#addr').value.trim()||'Pinned location',beds:$('#beds').value.trim(),link:$('#link').value.trim(),lat:pending.lat,lon:pending.lon,saved:false,note:''});
+  upd();render();
+  if(pendingMarker)map.removeLayer(pendingMarker);pending=null;
+  ['addr','price','beds','link'].forEach(i=>$('#'+i).value='');
+  $('#findMsg').textContent='You can also click the exact spot on the map.';
+  m.className='msg';m.textContent='Added. Tap its pin to save it or add notes.';
+  goTo(id);
+};
+
+/* ---------- Areas to avoid (marked by you) ---------- */
+function drawZones(){
+  zoneLayer.clearLayers();
+  zones.forEach(z=>{
+    const c=L.circle([z.lat,z.lon],{radius:500,color:'#b3261e',weight:2,fillColor:'#b3261e',fillOpacity:.22}).addTo(zoneLayer);
+    c.bindPopup(`<b>Area to avoid</b><br>${esc(z.label||'No reason added')}<br><button onclick="delZone('${z.id}')">Remove</button>`);
+  });
+}
+function delZone(id){zones=zones.filter(z=>z.id!==id);store('hx_zones',zones);map.closePopup();drawZones()}
+$('#exportBtn').onclick=()=>{
+  const blob=new Blob([JSON.stringify({listings,zones},null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='halifax-home-finder-data-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+};
+$('#importBtn').onclick=()=>$('#importFile').click();
+$('#importFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const m=$('#shareMsg');m.className='msg';
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      let added=0;
+      (data.listings||[]).forEach(l=>{if(!listings.some(x=>x.id===l.id)){listings.push(l);added++}});
+      (data.zones||[]).forEach(z=>{if(!zones.some(x=>x.id===z.id))zones.push(z)});
+      upd();store('hx_zones',zones);render();drawZones();
+      m.textContent='Added '+added+' new home(s) from that file.';
+    }catch(err){m.className='msg err';m.textContent='Couldn’t read that file.'}
+  };
+  reader.readAsText(f);
+};
+/* ---------- Public data (HRM open data, live) ---------- */
+const HRM='https://services2.arcgis.com/11XBiaBYA9Ep0yNJ/arcgis/rest/services/';
+const OPEN=[
+  {g:'Safety',k:'crime',label:'Reported incidents (police)',svc:'Crime',color:'#8a1c1c'},
+  {g:'Safety',k:'ssst',label:'Safe School Streets',svc:'Safe_School_Streets',color:'#1565c0'},
+  {g:'Safety',k:'guards',label:'School crossing guards',svc:'School_Crossing_Guards',color:'#f9a825'},
+  {g:'Roads, transit & parking',k:'closures',label:'Street closures',svc:'Street_Closures',color:'#e65100'},
+  {g:'Roads, transit & parking',k:'bus',label:'Transit bus routes',svc:'Transit_Bus_Routes',color:'#0277bd'},
+  {g:'Roads, transit & parking',k:'permit',label:'Commuter permit parking streets',svc:'Commuter_Permit_Parking_Streets',color:'#6a1b9a'},
+  {g:'Roads, transit & parking',k:'sidewalk',label:'Sidewalk winter maintenance',svc:'Sidewalk_Winter_Maintenance_Areas',color:'#00838f'},
+  {g:'Roads, transit & parking',k:'ev',label:'EV charging stations',svc:'EV_Charging_Station',color:'#2e7d32'},
+  {g:'Buildings',k:'bldg',label:'Building symbols',svc:'BuildingSymbol',color:'#78909c'},
+  {g:'Urban development',k:'landuse',label:'Future land use (Regional Plan)',svc:'Regional_Plan_Generalized_Future_Land_Use',color:'#8d6e63',colorBy:true}
+];
+$('#opengroups').innerHTML=[...new Set(OPEN.map(o=>o.g))].map(g=>`<label>${esc(g)}</label>`+OPEN.filter(o=>o.g===g).map(o=>`<label class="chk"><input type="checkbox" data-open="${o.k}"><span class="dot" style="background:${o.color}"></span>${esc(o.label)}<span class="msg" id="sto_${o.k}" style="margin:0 0 0 auto"></span></label>`).join('')).join('');
+async function fetchGeo(svc){
+  const base=HRM+svc+'/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson';
+  let all=[];
+  for(let i=0;i<40;i++){
+    const r=await fetch(all.length?base+'&resultOffset='+all.length:base);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    if(j.error)throw new Error(j.error.message||'service error');
+    const f=j.features||[];all=all.concat(f);
+    if(!f.length||!(j.exceededTransferLimit||(j.properties&&j.properties.exceededTransferLimit)))break;
+  }
+  return all;
+}
+const hue=s=>{let h=0;for(const ch of String(s))h=(h*31+ch.charCodeAt(0))%360;return 'hsl('+h+',55%,48%)'};
+function fmtVal(k,v){
+  if(typeof v==='number'&&v>9e11&&/date|time|dt$/i.test(k))return new Date(v).toLocaleDateString('en-CA',{dateStyle:'medium'});
+  return String(v).slice(0,120);
+}
+function openPopup(c,p){
+  if(c.k==='crime'){
+    const when=p.evt_date?fmtVal('date',p.evt_date):'';
+    return `<b>${esc(p.rucr_ext_d||'Reported incident')}</b>${p.location?'<br>'+esc(p.location):''}${when?'<br><small>'+esc(when)+'</small>':''}`;
+  }
+  const rows=Object.entries(p||{}).filter(([k,v])=>v!==null&&v!==''&&!/^(objectid|fid|globalid|shape)/i.test(k)).slice(0,8);
+  return `<b>${esc(c.label)}</b>`+(rows.length?'<br>'+rows.map(([k,v])=>`<small>${esc(k)}: ${esc(fmtVal(k,v))}</small>`).join('<br>'):'');
+}
+async function buildOpen(c){
+  const feats=await fetchGeo(c.svc);
+  let field=null;
+  if(c.colorBy&&feats.length){
+    const p=feats[0].properties||{};
+    field=Object.keys(p).find(k=>typeof p[k]==='string'&&/desig|land.?use|class|categ|type|zone/i.test(k))||Object.keys(p).find(k=>typeof p[k]==='string'&&/name|desc/i.test(k))||null;
+  }
+  const col=f=>field&&f.properties&&f.properties[field]?hue(f.properties[field]):c.color;
+  const layer=L.geoJSON({type:'FeatureCollection',features:feats},{
+    pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:c.k==='crime'?4:6,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.85}),
+    style:f=>{const poly=/Polygon/.test(f.geometry&&f.geometry.type);return {color:poly?col(f):c.color,weight:poly?1:3,opacity:.85,fillColor:col(f),fillOpacity:poly?(c.colorBy?.35:.2):0}},
+    onEachFeature:(f,l)=>l.bindPopup(()=>openPopup(c,f.properties))
+  });
+  c.layer=layer;c.count=feats.length;c.field=field;
+}
+document.querySelectorAll('[data-open]').forEach(cb=>cb.addEventListener('change',async()=>{
+  const c=OPEN.find(o=>o.k===cb.dataset.open),st=$('#sto_'+c.k);
+  if(!cb.checked){if(c.layer)map.removeLayer(c.layer);return}
+  if(!c.layer){
+    st.className='msg';st.textContent='loading…';
+    try{if(!c.loading)c.loading=buildOpen(c).finally(()=>c.loading=null);await c.loading}
+    catch(e){console.error(c.svc,e);st.className='msg err';st.textContent='failed — tick to retry';cb.checked=false;return}
+  }
+  st.className='msg';st.textContent=c.count+' found'+(c.field?' · by '+c.field:'');
+  if(cb.checked){c.layer.addTo(map);if(c.colorBy)c.layer.eachLayer(l=>l.bringToBack&&l.bringToBack())}
+}));
+/* ---------- Public CCTV cameras (Helios) ---------- */
+let camTok='';try{camTok=localStorage.getItem('hx_helios')||''}catch(e){}
+$('#camTok').value=camTok;
+const camLayer=L.layerGroup();let camTimer=null,camCtl=null;
+const camHead=()=>({Authorization:'Bearer '+camTok});
+function camPopup(f){
+  const p=f.properties||{},d=document.createElement('div');
+  d.innerHTML=`<b>${esc(p.description||f.id)}</b><br><small>${esc([p.city,p.state,p.provider].filter(Boolean).join(' · '))}</small><div class="msg camimg">Loading image…</div>`;
+  const box=d.querySelector('.camimg');
+  fetch('https://api.helios.earth/v1/cameras/'+encodeURIComponent(f.id)+'/live',{headers:camHead()})
+    .then(r=>{if(!r.ok)throw 0;return r.blob()})
+    .then(bl=>{const img=new Image();img.alt='Live camera image';img.style.cssText='width:100%;margin-top:6px;border-radius:4px';img.onload=()=>URL.revokeObjectURL(img.src);img.src=URL.createObjectURL(bl);box.replaceWith(img)})
+    .catch(()=>{box.className='msg err camimg';box.textContent='Couldn’t load the image.'});
+  return d;
+}
+async function loadCams(){
+  const st=$('#camSt');
+  if(!camTok){st.className='msg err';st.textContent='token needed';return}
+  if(map.getZoom()<12){st.className='msg';st.textContent='zoom in to load';camLayer.clearLayers();return}
+  const b=map.getBounds(),bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(n=>n.toFixed(5)).join(',');
+  if(camCtl)camCtl.abort();camCtl=new AbortController();
+  st.className='msg';st.textContent='loading…';
+  try{
+    const r=await fetch('https://api.helios.earth/v1/cameras?limit=100&bbox='+bbox,{headers:camHead(),signal:camCtl.signal});
+    if(r.status===401||r.status===403)throw new Error('token rejected or expired');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json(),fs=j.features||[];
+    camLayer.clearLayers();
+    fs.forEach(f=>{
+      const g=f.geometry&&f.geometry.coordinates;if(!g)return;
+      L.circleMarker([g[1],g[0]],{radius:6,color:'#fff',weight:1.5,fillColor:'#ad1457',fillOpacity:.95}).bindPopup(()=>camPopup(f),{minWidth:260}).addTo(camLayer);
+    });
+    st.className='msg';st.textContent=fs.length+' in view'+(fs.length>=100?' (first 100)':'');
+  }catch(e){
+    if(e.name==='AbortError')return;
+    console.error('Helios cameras:',e);
+    st.className='msg err';st.textContent=/fetch/i.test(e.message)?'blocked — see console':e.message;
+  }
+}
+$('#camToggle').onchange=e=>{
+  if(e.target.checked){camLayer.addTo(map);loadCams()}
+  else{map.removeLayer(camLayer);if(camCtl)camCtl.abort();$('#camSt').textContent=''}
+};
+map.on('moveend',()=>{if(!$('#camToggle').checked)return;clearTimeout(camTimer);camTimer=setTimeout(loadCams,500)});
+$('#camSave').onclick=()=>{
+  camTok=$('#camTok').value.trim();
+  try{localStorage.setItem('hx_helios',camTok)}catch(e){}
+  $('#camMsg').textContent=camTok?'Token saved on this computer.':'Token cleared.';
+  if($('#camToggle').checked)loadCams();
+};
+/* ---------- Webcams (OpenWebcamDB) ---------- */
+const OW_API='https://openwebcamdb-vwlaqcar.on-forge.com/api/v1';
+const OW_CREDIT='<a href="https://openwebcamdb.com" target="_blank" rel="noopener">Powered by OpenWebcamDB.com</a>';
+let owTok='';try{owTok=localStorage.getItem('hx_owdb')||''}catch(e){}
+$('#owTok').value=owTok;
+const owLayer=L.layerGroup();let owTimer=null,owCtl=null;
+function owPopup(w){
+  const sub=[w.city,w.country&&(w.country.name||w.country)].filter(Boolean).join(', ');
+  return `<b>${esc(w.title||w.slug)}</b>${sub?'<br><small>'+esc(sub)+'</small>':''}`
+    +(w.thumbnail_url?`<img alt="Latest still from this webcam" src="${esc(w.thumbnail_url)}" style="width:100%;margin-top:6px;border-radius:4px" referrerpolicy="no-referrer">`:'')
+    +(w.permalink?`<br><a href="${esc(w.permalink)}" target="_blank" rel="noopener">Watch live on OpenWebcamDB</a>`:'')
+    +(w.attribution?`<br><small>${esc(w.attribution)}</small>`:'')
+    +`<br><small>${OW_CREDIT}</small>`;
+}
+async function loadOW(){
+  const st=$('#owSt');
+  if(!owTok){st.className='msg err';st.textContent='key needed';return}
+  if(map.getZoom()<11){st.className='msg';st.textContent='zoom in to load';owLayer.clearLayers();return}
+  const b=map.getBounds();
+  const qs=new URLSearchParams({lat_min:b.getSouth().toFixed(6),lat_max:b.getNorth().toFixed(6),lng_min:b.getWest().toFixed(6),lng_max:b.getEast().toFixed(6)});
+  if(owCtl)owCtl.abort();owCtl=new AbortController();
+  st.className='msg';st.textContent='loading…';
+  try{
+    const r=await fetch(OW_API+'/webcams/map?'+qs,{headers:{Authorization:'Bearer '+owTok,Accept:'application/json'},signal:owCtl.signal});
+    if(r.status===401||r.status===403)throw new Error('key rejected');
+    if(r.status===429)throw new Error('rate limit — wait a minute');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json(),list=Array.isArray(j)?j:(j.data||j.webcams||[]);
+    owLayer.clearLayers();
+    let n=0;
+    list.forEach(w=>{
+      const lat=parseFloat(w.latitude),lon=parseFloat(w.longitude);
+      if(isNaN(lat)||isNaN(lon))return;n++;
+      L.circleMarker([lat,lon],{radius:6,color:'#fff',weight:1.5,fillColor:'#6a1b9a',fillOpacity:.95}).bindPopup(()=>owPopup(w),{minWidth:240}).addTo(owLayer);
+    });
+    st.className='msg';st.textContent=n+' in view';
+  }catch(e){
+    if(e.name==='AbortError')return;
+    console.error('OpenWebcamDB:',e);
+    st.className='msg err';st.textContent=/fetch/i.test(e.message)?'blocked — see console':e.message;
+  }
+}
+$('#owToggle').onchange=e=>{
+  if(e.target.checked){owLayer.addTo(map);map.attributionControl.addAttribution(OW_CREDIT);loadOW()}
+  else{map.removeLayer(owLayer);map.attributionControl.removeAttribution(OW_CREDIT);if(owCtl)owCtl.abort();$('#owSt').textContent=''}
+};
+map.on('moveend',()=>{if(!$('#owToggle').checked)return;clearTimeout(owTimer);owTimer=setTimeout(loadOW,700)});
+$('#owSave').onclick=()=>{
+  owTok=$('#owTok').value.trim();
+  try{localStorage.setItem('hx_owdb',owTok)}catch(e){}
+  $('#owMsg').textContent=owTok?'Key saved on this computer.':'Key cleared.';
+  if($('#owToggle').checked)loadOW();
+};
+$('#zoneBtn').onclick=()=>{mode='zone';$('#zoneBtn').textContent='Now click the map…';map.getContainer().style.cursor='crosshair'};
+$('#zoneToggle').onchange=e=>e.target.checked?zoneLayer.addTo(map):map.removeLayer(zoneLayer);
+map.on('click',e=>{
+  if(mode==='zone'){
+    const label=prompt('Why avoid this area? (optional)')||'';
+    zones.push({id:'z'+Date.now(),lat:e.latlng.lat,lon:e.latlng.lng,label});
+    store('hx_zones',zones);drawZones();
+    mode=null;$('#zoneBtn').textContent='Mark an area to avoid';map.getContainer().style.cursor='';
+  }else if(tab==='add'){setPending(e.latlng.lat,e.latlng.lng,'Location set from the map.')}
+});
+
+/* ---------- Tabs ---------- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  tab=b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id===tab));
+});
+
+/* ---------- News ---------- */
+const GAZ=[
+['Halifax Stanfield',44.8808,-63.5086],['Stanfield airport',44.8808,-63.5086],['Dalhousie',44.6366,-63.5917],['Citadel Hill',44.6478,-63.5806],
+['Lower Sackville',44.7650,-63.6800],['Sackville',44.7650,-63.6800],['Clayton Park',44.6600,-63.6500],['Spryfield',44.6150,-63.6150],['Fall River',44.8180,-63.6150],
+['Cole Harbour',44.6700,-63.4750],['Eastern Passage',44.6000,-63.5000],['Tantallon',44.6800,-63.8600],['Hammonds Plains',44.7200,-63.7800],['Timberlea',44.6700,-63.7400],
+['Herring Cove',44.5700,-63.5900],['Armdale',44.6300,-63.6050],['Burnside',44.7050,-63.5900],['Bedford',44.7276,-63.6590],['Lawrencetown',44.6540,-63.3600],
+['Musquodoboit',44.7960,-63.1620],['Shubenacadie',45.0830,-63.4170],['Enfield',44.9400,-63.5300],['Peggys Cove',44.4930,-63.9180],["Peggy's Cove",44.4930,-63.9180],
+['Chester',44.5380,-64.2370],['Mahone Bay',44.4500,-64.3800],['Lunenburg',44.3770,-64.3170],['Bridgewater',44.3780,-64.5190],['Liverpool',44.0390,-64.7160],
+['Shelburne',43.7630,-65.3230],['Yarmouth',43.8370,-66.1170],['Digby',44.6200,-65.7570],['Annapolis',44.7430,-65.5160],['Kentville',45.0770,-64.4950],
+['Wolfville',45.0910,-64.3650],['Windsor',44.9930,-64.1350],['Truro',45.3650,-63.2800],['Amherst',45.8170,-64.2170],['New Glasgow',45.5900,-62.6450],
+['Pictou',45.6800,-62.7080],['Antigonish',45.6170,-61.9980],['Port Hawkesbury',45.6170,-61.3670],['Glace Bay',46.1970,-59.9570],['Sydney',46.1370,-60.1940],
+['Baddeck',46.1000,-60.7500],['Inverness',46.2330,-61.3080],['Cape Breton',46.1400,-60.5000],['Dartmouth',44.6713,-63.5772],['Halifax',44.6488,-63.5752]
+];
+function findPlace(text){
+  const t=text.toLowerCase();
+  for(const g of GAZ){
+    const n=g[0].toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    if(new RegExp('(^|[^a-z])'+n+'([^a-z]|$)').test(t))return g;
+  }
+  return null;
+}
+const newsLayer=L.layerGroup().addTo(map);
+let newsMarkers={};
+async function news(){
+  try{
+    const r=await fetch('https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent('https://www.cbc.ca/webfeed/rss/rss-canada-novascotia'));
+    const j=await r.json();if(j.status!=='ok')throw 0;
+    newsLayer.clearLayers();newsMarkers={};
+    $('#news').innerHTML=j.items.slice(0,15).map((i,n)=>{
+      const d=new Date((i.pubDate||'').replace(' ','T')+'Z');
+      const g=findPlace((i.title||'')+' '+(i.description||'').replace(/<[^>]*>/g,' '));
+      let btn='<small>No specific place mentioned</small>';
+      if(g){
+        const m=L.circleMarker([g[1],g[2]],{radius:8,color:'#fff',weight:2,fillColor:'#d81b60',fillOpacity:1}).addTo(newsLayer);
+        m.bindPopup(`<b>${esc(i.title)}</b><br><a href="${esc(i.link)}" target="_blank" rel="noopener">Read the story</a><br><small>Location taken from the place name “${esc(g[0])}”, so it is approximate.</small>`);
+        newsMarkers[n]=m;
+        btn=`<button class="pinbtn" data-n="${n}">Show ${esc(g[0])} on map</button>`;
+      }
+      return `<div class="nitem"><a href="${esc(i.link)}" target="_blank" rel="noopener"><b>${esc(i.title)}</b><small>${isNaN(d)?'':d.toLocaleString('en-CA',{dateStyle:'medium',timeStyle:'short'})}</small></a>${btn}</div>`;
+    }).join('');
+    document.querySelectorAll('.pinbtn').forEach(b=>b.onclick=()=>{
+      const m=newsMarkers[+b.dataset.n];
+      if(!$('#newsToggle').checked){$('#newsToggle').checked=true;newsLayer.addTo(map)}
+      map.flyTo(m.getLatLng(),13);setTimeout(()=>m.openPopup(),600);
+    });
+  }catch(e){$('#news').innerHTML='<div class="msg err" style="padding-top:8px">Couldn’t load the news feed. Check your internet connection. <a href="https://www.cbc.ca/news/canada/nova-scotia" target="_blank" rel="noopener">Open CBC Nova Scotia</a></div>'}
+}
+$('#newsToggle').onchange=e=>e.target.checked?newsLayer.addTo(map):map.removeLayer(newsLayer);
+news();setInterval(news,600000);
+
+render();drawZones();
+</script>
+</body>
+</html>
