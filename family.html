@@ -53,6 +53,7 @@ summary{cursor:pointer;font-family:"Iowan Old Style",Georgia,serif;font-size:19p
 <main>
   <div class="top"><h1>Family</h1><a href="index.html">← Halifax Home Finder</a></div>
   <div id="wx" style="margin-top:10px"></div>
+  <div class="card err" id="fresh" hidden style="border-color:var(--bad)"><b>This device has a brand-new family topic.</b><br><span style="color:var(--ink)">If you already set things up on another phone or computer, this page will stay empty until it uses the same topic. Open the “Link for another parent’s phone” from that device (in Set up below), or paste its topic into the topic box.</span></div>
 
   <section class="card">
     <h2>Live view</h2>
@@ -72,7 +73,10 @@ summary{cursor:pointer;font-family:"Iowan Old Style",Georgia,serif;font-size:19p
     <p class="mute">1. Install the free <b>ntfy</b> app on your phone and subscribe to the topic below, so check-ins arrive as notifications.<br>2. Press “Send a test notification”.<br>3. Make a link for each child, send it to them, and ask them to open it and choose Add to Home Screen.</p>
     <label for="topic">Family topic (treat it like a password)</label>
     <input id="topic" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <div class="mute">On a second parent’s device, paste the same topic here so you both see the same map.</div>
+    <div class="mute">Every phone that should see the same map and check-ins must use this same topic.</div>
+    <label for="parentLink">Link for another parent’s phone</label>
+    <input id="parentLink" readonly>
+    <button id="copyParent">Copy this link</button> <span class="mute" id="parentMsg"></span>
     <button id="test">Send a test notification</button> <span class="mute" id="testMsg"></span>
 
     <label for="name">Child’s name</label>
@@ -107,17 +111,27 @@ const rand=()=>{const a=new Uint8Array(18),ch='abcdefghijklmnopqrstuvwxyz0123456
 let topic='';
 try{topic=(new URLSearchParams(location.search||location.hash.slice(1)).get('t')||'').replace(/[^A-Za-z0-9_-]/g,'')}catch(e){}
 if(!topic){try{topic=localStorage.getItem('hx_fam_topic')||''}catch(e){}}
-if(!topic)topic=rand();
+let freshTopic=false;
+if(!topic){topic=rand();freshTopic=true}
 try{localStorage.setItem('hx_fam_topic',topic)}catch(e){}
 /* keep the topic in the address, so Add to Home Screen remembers it (a home-screen app has its own empty storage) */
 function pinTopic(){try{history.replaceState(null,'',location.pathname+'?t='+encodeURIComponent(topic))}catch(e){}}
 pinTopic();
 $('#topic').value=topic;
+if(freshTopic)$('#fresh').hidden=false;
+const parentUrl=()=>new URL('family.html',location.href).href.split(/[?#]/)[0]+'?t='+encodeURIComponent(topic);
+const showParent=()=>{$('#parentLink').value=parentUrl()};
+showParent();
+$('#copyParent').onclick=async()=>{
+  const el=$('#parentLink'),m=$('#parentMsg');
+  try{await navigator.clipboard.writeText(el.value);m.textContent='Copied. Open it on the other phone.'}
+  catch(e){el.focus();el.select();m.textContent='Select and copy the link.'}
+};
 $('#topic').onchange=e=>{
   topic=e.target.value.replace(/[^A-Za-z0-9_-]/g,'')||rand();
   e.target.value=topic;
   try{localStorage.setItem('hx_fam_topic',topic)}catch(x){}
-  pinTopic();fitted=false;refresh();
+  pinTopic();showParent();$('#fresh').hidden=true;fitted=false;refresh();
 };
 try{if(localStorage.getItem('hx_fam_setup_done'))$('#setup').open=false}catch(e){}
 

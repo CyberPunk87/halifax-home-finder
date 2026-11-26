@@ -97,7 +97,7 @@ const statusEl=$('#status');
 function say(text,kind){statusEl.textContent=text;statusEl.className=kind||''}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clock=()=>new Date().toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
-const famUrl=()=>new URL('family.html',location.href).href.split('#')[0];
+const famUrl=()=>new URL('family.html',location.href).href.split(/[?#]/)[0]+'?t='+encodeURIComponent(cfg.t);
 const mapLink=(la,lo)=>'https://maps.google.com/?q='+la.toFixed(6)+','+lo.toFixed(6);
 let hist=[];try{hist=JSON.parse(localStorage.getItem('hx_kid_hist'))||[]}catch(e){}
 function addHist(label,loc){
