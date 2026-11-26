@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="manifest" href="family.webmanifest">
 <link rel="apple-touch-icon" href="icons/family-180.png">
 <link rel="icon" type="image/png" href="icons/family-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -105,14 +104,20 @@ const mapUrl=(la,lo)=>'https://maps.google.com/?q='+la.toFixed(6)+','+lo.toFixed
 
 /* ---------- topic ---------- */
 const rand=()=>{const a=new Uint8Array(18),ch='abcdefghijklmnopqrstuvwxyz0123456789';crypto.getRandomValues(a);return 'halifax-family-'+[...a].map(b=>ch[b%36]).join('')};
-let topic='';try{topic=localStorage.getItem('hx_fam_topic')||''}catch(e){}
-if(!topic){topic=rand();try{localStorage.setItem('hx_fam_topic',topic)}catch(e){}}
+let topic='';
+try{topic=(new URLSearchParams(location.search||location.hash.slice(1)).get('t')||'').replace(/[^A-Za-z0-9_-]/g,'')}catch(e){}
+if(!topic){try{topic=localStorage.getItem('hx_fam_topic')||''}catch(e){}}
+if(!topic)topic=rand();
+try{localStorage.setItem('hx_fam_topic',topic)}catch(e){}
+/* keep the topic in the address, so Add to Home Screen remembers it (a home-screen app has its own empty storage) */
+function pinTopic(){try{history.replaceState(null,'',location.pathname+'?t='+encodeURIComponent(topic))}catch(e){}}
+pinTopic();
 $('#topic').value=topic;
 $('#topic').onchange=e=>{
   topic=e.target.value.replace(/[^A-Za-z0-9_-]/g,'')||rand();
   e.target.value=topic;
   try{localStorage.setItem('hx_fam_topic',topic)}catch(x){}
-  fitted=false;refresh();
+  pinTopic();fitted=false;refresh();
 };
 try{if(localStorage.getItem('hx_fam_setup_done'))$('#setup').open=false}catch(e){}
 
@@ -138,7 +143,7 @@ function build(){
   const labels=$('#btns').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,8).map(s=>s.replace(/\|/g,' '));
   const emg=$('#emg').value.replace(/[^\d+]/g,'')||'911';
   const base=new URL('checkin.html',location.href).href.split('#')[0];
-  const link=base+'#t='+encodeURIComponent(topic)+'&n='+encodeURIComponent(name)+'&l='+($('#loc').checked?1:0)+'&e='+encodeURIComponent(emg)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'');
+  const link=base+'?t='+encodeURIComponent(topic)+'&n='+encodeURIComponent(name)+'&l='+($('#loc').checked?1:0)+'&e='+encodeURIComponent(emg)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'');
   m.className='mute';
   m.textContent=location.protocol==='file:'?'This copy is opened from a file, so the link would only work on this computer. Open this page from your hosted (github.io) address.':'Send this link to '+name+'. On their phone: open it, then choose Add to Home Screen.';
   try{localStorage.setItem('hx_fam_setup_done','1')}catch(e){}

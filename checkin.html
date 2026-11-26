@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<link rel="manifest" href="checkin.webmanifest">
 <link rel="apple-touch-icon" href="icons/checkin-180.png">
 <link rel="icon" type="image/png" href="icons/checkin-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -42,6 +41,8 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
 #hist li{padding:8px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
 #hist li span:last-child{color:var(--mute);white-space:nowrap}
 .note{color:var(--mute);font-size:13px;margin-top:20px}
+#recover input{width:100%;font:inherit;padding:12px;border:2px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);margin:6px 0 10px}
+#recover .mid{width:100%}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -49,6 +50,11 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
 <main>
   <h1 id="hello">Check in</h1>
   <p class="sub" id="sub">Tap a button to let your family know.</p>
+  <div id="recover" hidden>
+    <label for="pasteLink" style="font-weight:600">Paste the link your parent sent you</label>
+    <input id="pasteLink" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://…/checkin.html?t=…">
+    <button class="mid" id="useLink">Use this link</button>
+  </div>
   <div class="btns" id="btns"></div>
 
   <section id="livewrap" hidden>
@@ -76,10 +82,12 @@ const $=s=>document.querySelector(s);
 const DEFAULT_LABELS=['🏫 Got to school','🚪 Leaving school','🏠 Home safe','👋 Going out','🚶 Walking home'];
 let cfg=null;
 try{
-  const q=new URLSearchParams(location.hash.slice(1));
+  const q=new URLSearchParams(location.search||location.hash.slice(1));
   if(q.get('t')){
     cfg={t:q.get('t'),n:q.get('n')||'',l:q.get('l')!=='0',e:q.get('e')||'911',b:(q.get('b')||'').split('|').map(s=>s.trim()).filter(Boolean)};
     try{localStorage.setItem('hx_kid',JSON.stringify(cfg))}catch(e){}
+    /* keep the details in the address itself, so Add to Home Screen remembers them */
+    if(!location.search){try{history.replaceState(null,'',location.pathname+'?'+q.toString())}catch(e){}}
   }else{
     try{cfg=JSON.parse(localStorage.getItem('hx_kid'))}catch(e){}
   }
@@ -238,7 +246,13 @@ function emergencyAlert(){
 
 /* ----- start-up ----- */
 if(!cfg||!cfg.t){
-  $('#sub').textContent='This link is missing its details. Ask a parent to send you the check-in link again.';
+  $('#sub').textContent='This page doesn’t have your details yet. Paste the link your parent sent you below.';
+  $('#recover').hidden=false;
+  $('#useLink').onclick=()=>{
+    const v=$('#pasteLink').value.trim(),i=v.search(/[?#]/),rest=i<0?'':v.slice(i+1);
+    if(!/(^|&)t=/.test(rest)){say('That doesn’t look like the check-in link. Copy the whole link your parent sent.','err');return}
+    location.href=location.pathname+'?'+rest;
+  };
 }else{
   $('#hello').textContent=cfg.n?'Hi '+cfg.n:'Check in';
   const labels=(cfg.b&&cfg.b.length?cfg.b:DEFAULT_LABELS).slice(0,8);
@@ -266,7 +280,6 @@ if(!cfg||!cfg.t){
   if(lq.length)flush();
 }
 drawHist();
-window.addEventListener('hashchange',()=>location.reload());
 </script>
 </body>
 </html>
