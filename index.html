@@ -43,6 +43,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .leaflet-popup-content textarea{margin:6px 0}
 .leaflet-popup-content button{margin:4px 6px 0 0;padding:5px 9px;font:inherit;cursor:pointer;border-radius:5px;border:1px solid var(--ink);background:#fff}
 .bmlink{display:inline-block;padding:8px 12px;border-radius:6px;background:#d81b60;color:#fff;text-decoration:none;font-weight:600;cursor:grab}
+.sc{margin:8px 0 4px;padding-top:6px;border-top:1px solid #d5dde1;font-size:12.5px;color:#12263a}.scrow{display:flex;justify-content:space-between;gap:10px;margin:2px 0}.scrow span{color:#5d6f7e}.scrow b{text-align:right;font-weight:600}.scsub{color:#5d6f7e;font-size:12px;margin:0 0 4px}.scbad{color:#b3261e}.item .sumline{display:block;color:#12263a}
 @media (max-width:980px){body{grid-template-columns:1fr;grid-template-rows:auto 60vh auto;height:auto;overflow:auto}aside{max-height:none}#newsbox{border:0}}
 </style>
 </head>
@@ -76,6 +77,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
     <label>Homes on the map <span id="count"></span></label>
     <div id="list"></div>
+    <button class="act alt" id="scoreAll">Check the neighbourhood of all my homes</button>
+    <div class="msg" id="scoreMsg">Tap a home’s pin to see its neighbourhood details. This button fills in a one-line summary under every home.</div>
   </section>
 
   <section class="pane" id="open">
@@ -174,7 +177,7 @@ const map=L.map('map',{preferCanvas:true}).fitBounds([[44.58,-63.80],[44.76,-63.
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,attribution:'Tiles © Esri'}).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:16}).addTo(map);
 const homeLayer=L.layerGroup().addTo(map), zoneLayer=L.layerGroup().addTo(map);
-let markers={};
+let markers={},scoreCache={};
 
 /* ---------- Place layers (live from OpenStreetMap) ---------- */
 const CATS={
@@ -231,6 +234,7 @@ function fetchCat(k){
   c.promise=(async()=>{
     const sp=await staticPlaces();
     const pts=(sp&&Array.isArray(sp[k]))?sp[k]:await liveCat(k);
+    c.pts=pts;
     if(c.group)map.removeLayer(c.group);
     c.group=L.layerGroup();
     pts.forEach(p=>L.circleMarker([p.lat,p.lon],{radius:5,color:'#fff',weight:1,fillColor:c.color,fillOpacity:.95}).bindTooltip(esc(p.name||c.label)).addTo(c.group));
@@ -279,6 +283,7 @@ document.querySelectorAll('[data-cat]').forEach(cb=>cb.addEventListener('change'
 function popupHtml(l){
   return `<b>${money(l.price,l.kind)}</b> · ${l.kind==='rent'?'Rental':'For sale'}${l.beds?' · '+esc(l.beds)+' bed':''}<br>${esc(l.addr)}
   ${l.link?`<br><a href="${esc(l.link)}" target="_blank" rel="noopener">Open original listing</a>`:''}
+  <div class="sc" id="sc_${l.id}">Checking the neighbourhood… the first time takes a few seconds.</div>
   <textarea rows="2" placeholder="Your notes" onchange="setNote('${l.id}',this.value)">${esc(l.note||'')}</textarea>
   <button onclick="toggleSave('${l.id}')">${l.saved?'Remove from shortlist':'Save to shortlist'}</button><button onclick="del('${l.id}')">Delete</button>`;
 }
@@ -287,10 +292,10 @@ function render(){
   const f=$('#filter').value, shown=listings.filter(l=>f==='all'||l.kind===f);
   shown.forEach(l=>{
     const m=L.circleMarker([l.lat,l.lon],{radius:11,color:l.saved?'#12263a':'#fff',weight:l.saved?4:2,fillColor:COLOR[l.kind],fillOpacity:1}).addTo(homeLayer);
-    m.bindPopup(()=>popupHtml(l));markers[l.id]=m;
+    m.bindPopup(()=>popupHtml(l),{minWidth:260,maxWidth:320,maxHeight:420});m.on('popupopen',()=>fillScore(l));markers[l.id]=m;
   });
   $('#count').textContent=shown.length?'('+shown.length+')':'';
-  const row=l=>`<button class="item" onclick="goTo('${l.id}')"><b><span class="pill" style="background:${COLOR[l.kind]}">${l.kind==='rent'?'Rent':'Buy'}</span>${money(l.price,l.kind)}</b><span>${esc(l.addr)}${l.beds?' · '+esc(l.beds)+' bed':''}</span>${l.note?`<span><br>“${esc(l.note)}”</span>`:''}</button>`;
+  const row=l=>`<button class="item" onclick="goTo('${l.id}')"><b><span class="pill" style="background:${COLOR[l.kind]}">${l.kind==='rent'?'Rent':'Buy'}</span>${money(l.price,l.kind)}</b><span>${esc(l.addr)}${l.beds?' · '+esc(l.beds)+' bed':''}</span><span class="sumline" data-sid="${l.id}">${esc(scoreCache[l.id]||'')}</span>${l.note?`<span><br>“${esc(l.note)}”</span>`:''}</button>`;
   $('#list').innerHTML=shown.length?shown.map(row).join(''):'<div class="msg">No homes yet. Open “Add home” to put your first one on the map.</div>';
   const sv=listings.filter(l=>l.saved);
   $('#saved').innerHTML=sv.length?sv.map(row).join(''):'<div class="msg">Nothing saved yet. Tap a pin and choose “Save to shortlist”.</div>';
@@ -410,7 +415,7 @@ function openPopup(c,p){
   return `<b>${esc(c.label)}</b>`+(rows.length?'<br>'+rows.map(([k,v])=>`<small>${esc(k)}: ${esc(fmtVal(k,v))}</small>`).join('<br>'):'');
 }
 async function buildOpen(c){
-  const feats=await fetchGeo(c.svc);
+  const feats=await openData(c.k);
   let field=null;
   if(c.colorBy&&feats.length){
     const p=feats[0].properties||{};
@@ -684,6 +689,143 @@ $('#syncNow').onclick=()=>{if(!syncTok){syncStatus('Paste your token and press �
 $('#syncShow').onchange=e=>{$('#syncTok').type=e.target.checked?'text':'password'};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncNow(true)});
 if(syncTok)syncNow(true);
+
+/* ---------- Neighbourhood check for each home ---------- */
+const SC_M=500,SC_CLOSE=300,KY=110540;
+function openData(k){
+  const c=OPEN.find(o=>o.k===k);
+  if(c.feats)return Promise.resolve(c.feats);
+  if(!c.featP)c.featP=fetchGeo(c.svc).then(f=>(c.feats=f)).catch(e=>{c.featP=null;throw e});
+  return c.featP;
+}
+function segD(ax,ay,bx,by){const dx=bx-ax,dy=by-ay,len=dx*dx+dy*dy;let t=len?(-(ax*dx+ay*dy))/len:0;t=Math.max(0,Math.min(1,t));return Math.hypot(ax+t*dx,ay+t*dy)}
+function geomDist(h,g){
+  if(!g||!g.coordinates)return Infinity;
+  const t=g.type,c=g.coordinates,P=q=>[(q[0]-h.lon)*h.kx,(q[1]-h.lat)*KY];
+  if(t==='Point'){const p=P(c);return Math.hypot(p[0],p[1])}
+  if(t==='MultiPoint')return Math.min(Infinity,...c.map(q=>{const p=P(q);return Math.hypot(p[0],p[1])}));
+  const lines=t==='LineString'?[c]:t==='MultiLineString'?c:t==='Polygon'?c:t==='MultiPolygon'?c.flat():[];
+  let best=Infinity;
+  for(const ln of lines){
+    if(!ln.length)continue;
+    let prev=P(ln[0]);best=Math.min(best,Math.hypot(prev[0],prev[1]));
+    for(let i=1;i<ln.length;i++){const cur=P(ln[i]);const d=segD(prev[0],prev[1],cur[0],cur[1]);if(d<best)best=d;prev=cur}
+  }
+  return best;
+}
+function inRing(x,y,r){let ins=false;for(let i=0,j=r.length-1;i<r.length;j=i++){const xi=r[i][0],yi=r[i][1],xj=r[j][0],yj=r[j][1];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))ins=!ins}return ins}
+function inPoly(x,y,rings){if(!rings.length||!inRing(x,y,rings[0]))return false;for(let i=1;i<rings.length;i++)if(inRing(x,y,rings[i]))return false;return true}
+function inGeom(x,y,g){if(!g)return false;if(g.type==='Polygon')return inPoly(x,y,g.coordinates);if(g.type==='MultiPolygon')return g.coordinates.some(p=>inPoly(x,y,p));return false}
+function pickProps(p,re,max){
+  const out=[];
+  for(const [k,v] of Object.entries(p||{})){
+    if(out.length>=max)break;
+    if(re.test(k)&&v!==null&&v!==''&&(typeof v==='string'||typeof v==='number')&&!out.includes(String(v)))out.push(String(v));
+  }
+  return out;
+}
+function nearest(fs,h,re,within){
+  let best=null,n=0;
+  for(const f of fs){
+    const d=geomDist(h,f.geometry);
+    if(d<=within)n++;
+    if(!best||d<best.d)best={d,name:pickProps(f.properties,re,1)[0]||''};
+  }
+  return best?{d:best.d,name:best.name,n}:null;
+}
+async function computeScore(l){
+  const h={lat:l.lat,lon:l.lon,kx:111320*Math.cos(l.lat*Math.PI/180)},R={};
+  const job=(k,fn)=>fn().then(v=>{R[k]={v}}).catch(e=>{console.error('Neighbourhood check:',k,e);R[k]={err:1}});
+  const jobs=[
+    job('crime',async()=>{
+      const fs=await openData('crime');let n=0,lo=Infinity,hi=-Infinity;const types={};
+      for(const f of fs){
+        const g=f.geometry,p=f.properties||{};
+        if(typeof p.evt_date==='number'){if(p.evt_date<lo)lo=p.evt_date;if(p.evt_date>hi)hi=p.evt_date}
+        if(!g||g.type!=='Point')continue;
+        const dx=(g.coordinates[0]-h.lon)*h.kx,dy=(g.coordinates[1]-h.lat)*KY;
+        if(dx*dx+dy*dy<=SC_M*SC_M){n++;const t=p.rucr_ext_d||'Other';types[t]=(types[t]||0)+1}
+      }
+      return {n,lo,hi,top:Object.entries(types).sort((a,b)=>b[1]-a[1]).slice(0,3)};
+    }),
+    job('bus',async()=>nearest(await openData('bus'),h,/route|name|short|desc/i,0)),
+    job('closures',async()=>nearest(await openData('closures'),h,/street|name|desc|reason|location/i,SC_CLOSE)),
+    job('land',async()=>{
+      const fs=await openData('landuse');
+      for(const f of fs)if(inGeom(h.lon,h.lat,f.geometry))return {vals:pickProps(f.properties,/desig|land.?use|class|categ|type|zone|name|desc/i,2)};
+      return {vals:[]};
+    })
+  ];
+  Object.keys(CATS).forEach(k=>jobs.push(job(k,async()=>{
+    const c=await fetchCat(k);let best=null;
+    for(const p of c.pts||[]){const dx=(p.lon-h.lon)*h.kx,dy=(p.lat-h.lat)*KY,d=Math.hypot(dx,dy);if(!best||d<best.d)best={d,name:p.name}}
+    return best;
+  })));
+  await Promise.all(jobs);
+  let z=null;
+  zones.forEach(q=>{const d=Math.hypot((q.lon-h.lon)*h.kx,(q.lat-h.lat)*KY);if(z===null||d<z)z=d});
+  R.zone=z;
+  return R;
+}
+const fmtD=d=>d<1000?Math.max(10,Math.round(d/10)*10)+' m':(d/1000).toFixed(1)+' km';
+const walkD=d=>d<=3000?' · about '+Math.max(1,Math.round(d*1.3/80))+' min walk':'';
+const fmtMonth=ms=>new Date(ms).toLocaleDateString('en-CA',{year:'numeric',month:'short'});
+function scoreSummary(R){
+  const o=[];
+  if(R.crime&&R.crime.v)o.push(R.crime.v.n+' incidents within '+SC_M+' m');
+  if(R.bus&&R.bus.v)o.push('bus '+fmtD(R.bus.v.d));
+  if(R.grocery&&R.grocery.v)o.push('grocery '+fmtD(R.grocery.v.d));
+  return o.join(' · ');
+}
+function scoreHtml(R){
+  const row=(a,b)=>`<div class="scrow"><span>${a}</span><b>${b}</b></div>`;
+  const bad='<b class="scbad">couldn’t load</b>';
+  const out=[];
+  const cr=R.crime;
+  if(cr&&cr.v){
+    out.push(row('Reported incidents within '+SC_M+' m',cr.v.n));
+    if(cr.v.top.length)out.push(`<div class="scsub">${cr.v.top.map(t=>esc(t[0])+' ('+t[1]+')').join(', ')}</div>`);
+    if(isFinite(cr.v.lo))out.push(`<div class="scsub">Data covers ${esc(fmtMonth(cr.v.lo))} to ${esc(fmtMonth(cr.v.hi))}. A count of reports, not a safety rating.</div>`);
+  }else out.push(row('Reported incidents',bad));
+  const near=(label,x,nameToo)=>{
+    if(x&&x.v)out.push(row(label,fmtD(x.v.d)+walkD(x.v.d)+(nameToo&&x.v.name?' · '+esc(x.v.name):'')));
+    else if(x&&x.err)out.push(row(label,bad));
+  };
+  near('Nearest bus route',R.bus,true);
+  near('Nearest grocery store',R.grocery,true);
+  near('Nearest school',R.school,true);
+  near('Nearest hospital',R.hospital,true);
+  near('Nearest police station',R.police,false);
+  near('Nearest fire station',R.fire,false);
+  if(R.closures&&R.closures.v)out.push(row('Street closures within '+SC_CLOSE+' m',R.closures.v.n));
+  else out.push(row('Street closures',bad));
+  if(R.land&&R.land.v)out.push(row('Future land use here',R.land.v.vals.length?esc(R.land.v.vals.join(' · ')):'not listed'));
+  else out.push(row('Future land use here',bad));
+  if(R.zone===null)out.push(row('Areas you marked to avoid','none marked'));
+  else if(R.zone<=500)out.push(row('Areas you marked to avoid','<span class="scbad">inside one</span>'));
+  else if(R.zone<=1500)out.push(row('Areas you marked to avoid',fmtD(R.zone-500)+' from the edge of one'));
+  else out.push(row('Areas you marked to avoid','none nearby'));
+  return out.join('');
+}
+function setSummary(id,R){
+  const t=scoreSummary(R);scoreCache[id]=t;
+  document.querySelectorAll('[data-sid="'+id+'"]').forEach(e=>e.textContent=t);
+}
+async function fillScore(l){
+  const R=await computeScore(l);
+  setSummary(l.id,R);
+  const box=document.getElementById('sc_'+l.id);
+  if(box)box.innerHTML=scoreHtml(R);
+}
+$('#scoreAll').onclick=async()=>{
+  const m=$('#scoreMsg');
+  if(!listings.length){m.textContent='Add a home first.';return}
+  for(let i=0;i<listings.length;i++){
+    m.className='msg';m.textContent='Checking '+(i+1)+' of '+listings.length+'… the first one takes longest.';
+    setSummary(listings[i].id,await computeScore(listings[i]));
+  }
+  m.textContent='Done. The numbers now show under each home.';
+};
 
 /* ---------- News ---------- */
 const GAZ=[
