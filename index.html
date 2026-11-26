@@ -117,6 +117,28 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <button class="act alt" id="syncSave">Turn on sync</button>
     <button class="act alt" id="syncNow">Sync now</button>
     <div class="msg" id="syncMsg"></div>
+    <details id="fam" style="margin-top:16px">
+      <summary style="font-weight:600;cursor:pointer;font-size:13px">Family check-in (push button for the kids)</summary>
+      <div class="msg">Your kids tap a big button on their phone (arrived at school, going out, home safe…) and you get a notification with the time and a map link. It uses ntfy.sh, a free notification service. Set up:<br>1. Install the free <b>ntfy</b> app on your phone and subscribe to the topic below.<br>2. Press “Send a test” to check it reaches you.<br>3. Make a link for each child, send it to them, and ask them to open it and choose Add to Home Screen.</div>
+      <label for="famTopic">Family topic (treat it like a password)</label>
+      <input id="famTopic" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="act alt" id="famTest">Send a test notification</button>
+      <div class="msg" id="famTestMsg"></div>
+      <label for="famName">Child’s name</label>
+      <input id="famName" placeholder="e.g. Sara">
+      <label for="famBtns">Buttons (one per line, up to 8)</label>
+      <textarea id="famBtns" rows="5">🏫 Got to school
+🚪 Leaving school
+🏠 Home safe
+👋 Going out
+🚶 Walking home</textarea>
+      <label class="chk"><input type="checkbox" id="famLoc" checked> Include their location</label>
+      <button class="act" id="famMake">Make the link</button>
+      <input id="famLink" readonly style="margin-top:8px" placeholder="The link appears here">
+      <button class="act alt" id="famCopy">Copy link</button>
+      <div class="msg" id="famMsg"></div>
+      <div class="msg">Privacy: anyone who learns the topic can read these messages and send fake ones, so only share the link with your children and never post it. Messages are kept by ntfy.sh for about 12 hours. Children see a note on their page that each tap shares their location.</div>
+    </details>
     <div id="saved"></div>
   </section>
 
@@ -825,6 +847,48 @@ $('#scoreAll').onclick=async()=>{
     setSummary(listings[i].id,await computeScore(listings[i]));
   }
   m.textContent='Done. The numbers now show under each home.';
+};
+
+/* ---------- Family check-in (ntfy.sh push notifications) ---------- */
+const famRand=()=>{const a=new Uint8Array(18),ch='abcdefghijklmnopqrstuvwxyz0123456789';crypto.getRandomValues(a);return 'halifax-family-'+[...a].map(b=>ch[b%36]).join('')};
+let famTopic='';try{famTopic=localStorage.getItem('hx_fam_topic')||''}catch(e){}
+if(!famTopic){famTopic=famRand();try{localStorage.setItem('hx_fam_topic',famTopic)}catch(e){}}
+$('#famTopic').value=famTopic;
+$('#famTopic').onchange=e=>{
+  const v=e.target.value.replace(/[^A-Za-z0-9_-]/g,'');
+  famTopic=v||famRand();e.target.value=famTopic;
+  try{localStorage.setItem('hx_fam_topic',famTopic)}catch(x){}
+};
+async function ntfySend(topic,title,message,click,priority){
+  try{
+    const r=await fetch('https://ntfy.sh/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,title,message,click:click||undefined,priority:priority||3})});
+    if(r.ok)return true;
+  }catch(e){}
+  const r2=await fetch('https://ntfy.sh/'+encodeURIComponent(topic),{method:'POST',body:title+'\n'+message+(click?'\n'+click:'')});
+  return r2.ok;
+}
+$('#famTest').onclick=async()=>{
+  const m=$('#famTestMsg');m.className='msg';m.textContent='Sending…';
+  try{
+    if(!await ntfySend(famTopic,'Home Finder test','If you can read this, check-ins will reach you.','',3))throw new Error('refused');
+    m.textContent='Sent. It should pop up within a few seconds on any phone subscribed to this topic.';
+  }catch(e){console.error(e);m.className='msg err';m.textContent='Couldn’t send the test. Check your internet connection.'}
+};
+function famBuild(){
+  const name=$('#famName').value.trim(),m=$('#famMsg');
+  if(!name){m.className='msg err';m.textContent='Enter the child’s name first.';return ''}
+  const labels=$('#famBtns').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,8).map(s=>s.replace(/\|/g,' '));
+  const base=new URL('checkin.html',location.href).href.split('#')[0];
+  const link=base+'#t='+encodeURIComponent(famTopic)+'&n='+encodeURIComponent(name)+'&l='+($('#famLoc').checked?1:0)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'');
+  m.className='msg';
+  m.textContent=location.protocol==='file:'?'This copy is opened from a file, so the link would only work on this computer. Make it from your hosted (github.io) address.':'Send this link to '+name+'. On their phone: open it, then choose Add to Home Screen.';
+  return link;
+}
+$('#famMake').onclick=()=>{$('#famLink').value=famBuild()};
+$('#famCopy').onclick=async()=>{
+  const el=$('#famLink');if(!el.value)el.value=famBuild();if(!el.value)return;
+  try{await navigator.clipboard.writeText(el.value);$('#famMsg').className='msg';$('#famMsg').textContent='Link copied.'}
+  catch(e){el.focus();el.select();$('#famMsg').className='msg';$('#famMsg').textContent='Select and copy the link above.'}
 };
 
 /* ---------- News ---------- */
