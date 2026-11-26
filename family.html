@@ -70,7 +70,7 @@ summary{cursor:pointer;font-family:"Iowan Old Style",Georgia,serif;font-size:19p
 
   <details class="card" id="setup" open>
     <summary>Set up</summary>
-    <p class="mute">1. Install the free <b>ntfy</b> app on your phone and subscribe to the topic below, so check-ins arrive as notifications.<br>2. Press “Send a test notification”.<br>3. Make a link for each child, send it to them, and ask them to open it and choose Add to Home Screen.</p>
+    <p class="mute">1. Install the free <b>ntfy</b> app on your phone and subscribe to the topic below, so check-ins arrive as notifications.<br>2. Press “Send a test notification”.<br>3. Make a link for each child, send it to them, and ask them to open it and choose Add to Home Screen.<br>Each child’s page also has a safety timer (you’re alerted if they don’t tap “I’m safe”) and an emergency card with their address to read to 911.</p>
     <label for="topic">Family topic (treat it like a password)</label>
     <input id="topic" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="mute">Every phone that should see the same map and check-ins must use this same topic.</div>
@@ -90,6 +90,13 @@ summary{cursor:pointer;font-family:"Iowan Old Style",Georgia,serif;font-size:19p
     <label for="emg">Emergency number</label>
     <input id="emg" value="911" inputmode="tel">
     <div class="mute">In Canada, 911 reaches police, ambulance and fire. The red button opens the phone’s dialer and alerts you.</div>
+    <label for="home">Home address (for their emergency card)</label>
+    <input id="home" placeholder="e.g. 12 Example St, Halifax">
+    <label for="phones">Phone numbers to call (one per line)</label>
+    <textarea id="phones" rows="3" placeholder="Mum 902 555 0100&#10;Dad 902 555 0101"></textarea>
+    <label for="med">Medical information (allergies, conditions, medication)</label>
+    <textarea id="med" rows="2" placeholder="e.g. Allergic to peanuts. Carries an EpiPen."></textarea>
+    <div class="mute">These appear on the child’s emergency card, together with their live address, so they can read it to 911. They are stored inside the link you send them, not on ntfy.sh. Leave any of them blank to skip it.</div>
     <label class="chk"><input type="checkbox" id="loc" checked> Include their location (needed for live sharing)</label>
     <button class="pri" id="make">Make the link</button>
     <input id="link" readonly style="margin-top:8px" placeholder="The link appears here">
@@ -156,13 +163,17 @@ function build(){
   if(!name){m.className='err';m.textContent='Enter the child’s name first.';return ''}
   const labels=$('#btns').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,8).map(s=>s.replace(/\|/g,' '));
   const emg=$('#emg').value.replace(/[^\d+]/g,'')||'911';
+  const home=$('#home').value.trim().replace(/\s+/g,' '),med=$('#med').value.trim().replace(/\s*\n\s*/g,' / ');
+  const phones=$('#phones').value.split('\n').map(s=>s.trim().replace(/\|/g,' ')).filter(Boolean).slice(0,5);
+  try{localStorage.setItem('hx_fam_info',JSON.stringify({home:$('#home').value,phones:$('#phones').value,med:$('#med').value}))}catch(e){}
   const base=new URL('checkin.html',location.href).href.split('#')[0];
-  const link=base+'?t='+encodeURIComponent(topic)+'&n='+encodeURIComponent(name)+'&l='+($('#loc').checked?1:0)+'&e='+encodeURIComponent(emg)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'');
+  const link=base+'?t='+encodeURIComponent(topic)+'&n='+encodeURIComponent(name)+'&l='+($('#loc').checked?1:0)+'&e='+encodeURIComponent(emg)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'')+(home?'&a='+encodeURIComponent(home):'')+(phones.length?'&p='+encodeURIComponent(phones.join('|')):'')+(med?'&m='+encodeURIComponent(med):'');
   m.className='mute';
   m.textContent=location.protocol==='file:'?'This copy is opened from a file, so the link would only work on this computer. Open this page from your hosted (github.io) address.':'Send this link to '+name+'. On their phone: open it, then choose Add to Home Screen.';
   try{localStorage.setItem('hx_fam_setup_done','1')}catch(e){}
   return link;
 }
+try{const fi=JSON.parse(localStorage.getItem('hx_fam_info'));if(fi){$('#home').value=fi.home||'';$('#phones').value=fi.phones||'';$('#med').value=fi.med||''}}catch(e){}
 $('#make').onclick=()=>{$('#link').value=build()};
 $('#copy').onclick=async()=>{
   const el=$('#link');if(!el.value)el.value=build();if(!el.value)return;

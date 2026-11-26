@@ -43,6 +43,19 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
 .note{color:var(--mute);font-size:13px;margin-top:20px}
 #recover input{width:100%;font:inherit;padding:12px;border:2px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);margin:6px 0 10px}
 #recover .mid{width:100%}
+.row4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+#timerbox{padding:14px;border-radius:14px;background:var(--card);border:2px solid #8a5a14;font-size:16px}
+#timerbox .rowb{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#timerbox button{min-height:52px;padding:8px 18px;border-radius:12px;border:2px solid #2e7d32;background:var(--card);color:var(--ink);font:inherit;font-weight:700;cursor:pointer}
+#timerbox button.ok{background:#2e7d32;color:#fff}
+.cardbtn{background:#2f6db5;margin-top:14px}
+.overlay{position:fixed;inset:0;z-index:20;overflow:auto;background:var(--bg);padding:max(18px,env(safe-area-inset-top)) 18px max(24px,env(safe-area-inset-bottom))}
+.ecin{max-width:480px;margin:0 auto}
+.ecin h1{font-size:26px;margin:6px 0 4px}
+.ecbig{font-size:26px;font-weight:700;line-height:1.25;margin:6px 0}
+.ecin .mid{width:100%;margin:8px 0}
+.ecin a.big{margin:8px 0}
+.ectext{font-size:18px;white-space:pre-line}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -70,6 +83,23 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
     </div>
   </section>
 
+  <section id="timerwrap" hidden>
+    <h2>Safety timer</h2>
+    <p class="note" style="margin:0 0 8px">Heading somewhere? If you haven’t tapped “I’m safe” when this runs out, your family gets an alert.</p>
+    <div id="timerpick" class="row4">
+      <button class="mid" data-min="10">10 min</button>
+      <button class="mid" data-min="20">20 min</button>
+      <button class="mid" data-min="30">30 min</button>
+      <button class="mid" data-min="60">1 hour</button>
+    </div>
+    <div id="timerbox" hidden role="status">
+      <div id="timerinfo"></div>
+      <div class="rowb"><button class="ok" id="timerSafe">✅ I’m safe</button><button id="timerExtend">+10 min</button></div>
+    </div>
+  </section>
+
+  <button class="big cardbtn" id="openCard" hidden>📋 Emergency card: my address &amp; info</button>
+
   <a class="big sos" id="call911" href="tel:911" hidden>🚨 Emergency: call 911<small>Police · Ambulance · Fire</small></a>
 
   <div id="status" role="status" aria-live="polite"></div>
@@ -77,6 +107,22 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
   <ul id="hist"></ul>
   <p class="note" id="note"></p>
 </main>
+<div class="overlay" id="ecard" role="dialog" aria-modal="true" aria-labelledby="ectitle" hidden>
+  <div class="ecin">
+    <button class="mid" id="ecClose">✕ Close</button>
+    <h1 id="ectitle">Emergency card</h1>
+    <h2>Where I am: read this to 911</h2>
+    <div class="ecbig" id="ecAddr">Finding your location…</div>
+    <div class="sub" id="ecCoord"></div>
+    <button class="mid" id="ecRefresh">Update my location</button>
+    <div id="ecMeWrap"><h2>My name</h2><div class="ectext" id="ecMe"></div></div>
+    <div id="ecMedWrap" hidden><h2>Medical information</h2><div class="ectext" id="ecMed"></div></div>
+    <div id="ecHomeWrap" hidden><h2>My home address</h2><div class="ectext" id="ecHome"></div></div>
+    <div id="ecPhonesWrap" hidden><h2>Call my family</h2><div id="ecPhones"></div></div>
+    <a class="big sos" id="ecCall" href="tel:911">🚨 Call 911</a>
+    <p class="note">This card stays on your phone. Nothing here is sent anywhere. The address comes from your phone’s GPS, which can be off by a block or more, so tell them what you can see around you too.</p>
+  </div>
+</div>
 <script>
 const $=s=>document.querySelector(s);
 const DEFAULT_LABELS=['🏫 Got to school','🚪 Leaving school','🏠 Home safe','👋 Going out','🚶 Walking home'];
@@ -84,7 +130,7 @@ let cfg=null;
 try{
   const q=new URLSearchParams(location.search||location.hash.slice(1));
   if(q.get('t')){
-    cfg={t:q.get('t'),n:q.get('n')||'',l:q.get('l')!=='0',e:q.get('e')||'911',b:(q.get('b')||'').split('|').map(s=>s.trim()).filter(Boolean)};
+    cfg={t:q.get('t'),n:q.get('n')||'',l:q.get('l')!=='0',e:q.get('e')||'911',b:(q.get('b')||'').split('|').map(s=>s.trim()).filter(Boolean),a:q.get('a')||'',m:q.get('m')||'',p:(q.get('p')||'').split('|').map(s=>s.trim()).filter(Boolean)};
     try{localStorage.setItem('hx_kid',JSON.stringify(cfg))}catch(e){}
     /* keep the details in the address itself, so Add to Home Screen remembers them */
     if(!location.search){try{history.replaceState(null,'',location.pathname+'?'+q.toString())}catch(e){}}
@@ -96,7 +142,7 @@ if(cfg&&!/^\+?\d{3,15}$/.test(cfg.e||''))cfg.e='911';
 const statusEl=$('#status');
 function say(text,kind){statusEl.textContent=text;statusEl.className=kind||''}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const clock=()=>new Date().toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
+const clock=t=>new Date(t||Date.now()).toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
 const famUrl=()=>new URL('family.html',location.href).href.split(/[?#]/)[0]+'?t='+encodeURIComponent(cfg.t);
 const mapLink=(la,lo)=>'https://maps.google.com/?q='+la.toFixed(6)+','+lo.toFixed(6);
 let hist=[];try{hist=JSON.parse(localStorage.getItem('hx_kid_hist'))||[]}catch(e){}
@@ -119,10 +165,10 @@ async function ntfySend(topic,title,message,click,priority,keep){
 }
 let lastPos=null;
 function remember(c){lastPos={lat:c.latitude,lon:c.longitude,acc:c.accuracy,t:Date.now()}}
-function getPos(){
+function getPos(maxAge){
   return new Promise(res=>{
     if(!navigator.geolocation)return res(null);
-    navigator.geolocation.getCurrentPosition(p=>{remember(p.coords);res(p.coords)},()=>res(null),{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
+    navigator.geolocation.getCurrentPosition(p=>{remember(p.coords);res(p.coords)},()=>res(null),{enableHighAccuracy:true,timeout:10000,maximumAge:typeof maxAge==='number'?maxAge:60000});
   });
 }
 
@@ -145,7 +191,7 @@ async function checkin(label,urgent){
     }
     if(!await ntfySend(cfg.t,who+': '+label,msg,click,urgent?5:3))throw new Error('send failed');
     addHist(label,!!pos);
-    say('✓ Sent at '+time+(pos?'':' — without your location'),'ok');
+    say('✓ Sent at '+time+(pos?'':' — without your location')+(timer&&Date.now()<timer.end?'. Your safety timer is still running: tap “I’m safe” when you arrive.':''),'ok');
   }catch(e){
     console.error(e);
     say('Couldn’t send. Check your internet and try again.','err');
@@ -244,6 +290,126 @@ function emergencyAlert(){
   addHist('🚨 '+cfg.e+' button',!!click);
 }
 
+/* ----- safety timer: alerts the family unless cancelled ----- */
+const TM_KEY='hx_timer';
+let timer=null;try{timer=JSON.parse(localStorage.getItem(TM_KEY))}catch(e){}
+const saveTimer=()=>{try{timer?localStorage.setItem(TM_KEY,JSON.stringify(timer)):localStorage.removeItem(TM_KEY)}catch(e){}};
+const whoName=()=>cfg.n||'Your child';
+/* The alert is handed to ntfy.sh now with a delay. Cancelling deletes it before it is sent. */
+async function scheduleAlert(id,mins){
+  const pos=lastPos&&Date.now()-lastPos.t<15*60000?lastPos:null;
+  let msg=whoName()+'’s safety timer ran out and was not cancelled. They may just have forgotten to tap “I’m safe”, so try calling first.';
+  let click='';
+  if(pos){click=mapLink(pos.lat,pos.lon);msg+='\nLocation when the timer was set: '+click}
+  const r=await fetch('https://ntfy.sh/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:cfg.t,title:'⚠️ '+whoName()+' hasn’t checked in',message:msg,priority:5,click:click||undefined,delay:mins+'m',sequence_id:id})});
+  return r.ok;
+}
+async function startTimer(mins){
+  if(timer)return;
+  say('Starting the timer…');
+  const id='tm'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  try{
+    if(cfg.l&&!lastPos)await getPos();
+    if(!await scheduleAlert(id,mins))throw new Error('refused');
+  }catch(e){console.error(e);say('Couldn’t start the timer. Check your internet and try again.','err');return}
+  timer={id,end:Date.now()+mins*60000};saveTimer();renderTimer();
+  const pos=lastPos&&Date.now()-lastPos.t<15*60000?lastPos:null;
+  ntfySend(cfg.t,whoName()+': ⏱ safety timer started','Alert goes out at '+clock(timer.end)+' unless it is cancelled.'+(pos?'\nMap: '+mapLink(pos.lat,pos.lon):''),pos?mapLink(pos.lat,pos.lon):'',3).catch(()=>{});
+  addHist('⏱ Safety timer '+mins+' min',!!pos);
+  say('Timer started. Tap “I’m safe” when you arrive.','ok');
+}
+async function cancelTimer(){
+  if(!timer)return;
+  const t=timer,late=Date.now()>=t.end;
+  try{
+    await fetch('https://ntfy.sh/'+encodeURIComponent(cfg.t)+'/'+encodeURIComponent(t.id)+'/delete',{mode:'no-cors'});
+  }catch(e){say('Couldn’t cancel. Check your internet and try again, or call your family.','err');return}
+  timer=null;saveTimer();renderTimer();
+  ntfySend(cfg.t,whoName()+': ✅ I’m safe','Safety timer cancelled at '+clock()+(late?' (after it had already gone off).':'.'),'',3).catch(()=>{});
+  addHist('✅ I’m safe',true);
+  say('✓ Timer cancelled. Your family knows you’re safe.','ok');
+}
+async function extendTimer(){
+  if(!timer||Date.now()>=timer.end)return;
+  const mins=Math.ceil((timer.end+10*60000-Date.now())/60000);
+  try{if(!await scheduleAlert(timer.id,mins))throw new Error('refused')}
+  catch(e){say('Couldn’t add time. Check your internet and try again.','err');return}
+  timer.end=Date.now()+mins*60000;saveTimer();renderTimer();
+  say('Added 10 minutes. Alert now at '+clock(timer.end)+'.','ok');
+}
+function renderTimer(){
+  const pick=$('#timerpick'),box=$('#timerbox');
+  if(!timer){pick.hidden=false;box.hidden=true;return}
+  pick.hidden=true;box.hidden=false;
+  const ms=timer.end-Date.now();
+  $('#timerinfo').innerHTML=ms>0
+    ?'<b>⏱ Safety timer running</b><br>'+Math.ceil(ms/60000)+' min left. Your family is alerted at '+esc(clock(timer.end))+' unless you tap “I’m safe”.'
+    :'<b>⏱ The timer ran out</b><br>Your family has been alerted. Tap “I’m safe” if you are.';
+  $('#timerExtend').hidden=ms<=0;
+}
+
+/* ----- emergency card ----- */
+let addrCache=null;try{addrCache=JSON.parse(localStorage.getItem('hx_kid_addr'))}catch(e){}
+async function reverseGeocode(lat,lon){
+  const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),9000);
+  try{
+    const r=await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&accept-language=en&lat='+lat+'&lon='+lon,{signal:ctl.signal});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json(),a=j.address||{};
+    const street=[a.house_number,a.road].filter(Boolean).join(' ');
+    const parts=[street||a.amenity||a.building||'',a.suburb||a.neighbourhood||a.city_district||'',a.city||a.town||a.village||a.municipality||'',a.postcode||''].filter(Boolean);
+    return {text:parts.join(', ')||String(j.display_name||''),exact:!!a.house_number};
+  }finally{clearTimeout(t)}
+}
+let ecBusy=false;
+async function ecUpdate(){
+  if(ecBusy)return;ecBusy=true;
+  const addrEl=$('#ecAddr'),coordEl=$('#ecCoord'),btn=$('#ecRefresh');
+  btn.disabled=true;addrEl.textContent='Finding your location…';coordEl.textContent='';
+  const cached=()=>addrCache&&addrCache.text?'\nLast known address ('+Math.max(0,Math.round((Date.now()-addrCache.t)/60000))+' min ago): '+addrCache.text:'';
+  try{
+    const pos=await getPos(10000);
+    if(!pos){addrEl.textContent='I can’t get my location right now.'+cached();return}
+    coordEl.textContent=pos.latitude.toFixed(5)+', '+pos.longitude.toFixed(5)+' · accurate to about '+Math.max(5,Math.round(pos.accuracy))+' m · '+clock();
+    try{
+      const r=await reverseGeocode(pos.latitude,pos.longitude);
+      if(!r.text)throw new Error('no address');
+      addrEl.textContent=(r.exact?'':'Near ')+r.text;
+      addrCache={text:(r.exact?'':'Near ')+r.text,t:Date.now()};
+      try{localStorage.setItem('hx_kid_addr',JSON.stringify(addrCache))}catch(e){}
+    }catch(e){
+      console.error(e);
+      addrEl.textContent='No street address available. Tell them these numbers and what you can see around you.'+cached();
+    }
+  }finally{btn.disabled=false;ecBusy=false}
+}
+function telLinks(lines){
+  return lines.map(l=>{
+    const m=/\+?\d[\d\s().-]{5,}\d/.exec(l),d=m?m[0].replace(/[^\d+]/g,''):'';
+    return d?`<a class="big c2" href="tel:${d}">📞 ${esc(l)}</a>`:`<div class="ectext">${esc(l)}</div>`;
+  }).join('');
+}
+let ecOpener=null;
+function openCard(){
+  ecOpener=document.activeElement;
+  $('#ecMe').textContent=cfg.n||'(name not set)';
+  const set=(wrap,el,txt)=>{$(wrap).hidden=!txt;if(txt)$(el).textContent=txt};
+  set('#ecMedWrap','#ecMed',cfg.m||'');
+  set('#ecHomeWrap','#ecHome',cfg.a||'');
+  const ph=cfg.p||[];
+  $('#ecPhonesWrap').hidden=!ph.length;
+  if(ph.length)$('#ecPhones').innerHTML=telLinks(ph);
+  $('#ecCall').href='tel:'+cfg.e;$('#ecCall').textContent='🚨 Call '+cfg.e;
+  $('#ecard').hidden=false;document.body.style.overflow='hidden';
+  $('#ecClose').focus();
+  ecUpdate();
+}
+function closeCard(){
+  $('#ecard').hidden=true;document.body.style.overflow='';
+  if(ecOpener&&ecOpener.focus)ecOpener.focus();
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#ecard').hidden)closeCard()});
+
 /* ----- start-up ----- */
 if(!cfg||!cfg.t){
   $('#sub').textContent='This page doesn’t have your details yet. Paste the link your parent sent you below.';
@@ -269,6 +435,14 @@ if(!cfg||!cfg.t){
     setTimeout(getPos,800);
     setInterval(()=>{if(!document.hidden&&!live)getPos()},120000);
   }
+  $('#timerwrap').hidden=false;
+  $('#timerpick').onclick=e=>{const b=e.target.closest('button');if(b)startTimer(+b.dataset.min)};
+  $('#timerSafe').onclick=cancelTimer;
+  $('#timerExtend').onclick=extendTimer;
+  renderTimer();setInterval(renderTimer,15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)renderTimer()});
+  $('#openCard').hidden=false;
+  $('#openCard').onclick=openCard;$('#ecClose').onclick=closeCard;$('#ecRefresh').onclick=ecUpdate;
   const sos=$('#call911');
   sos.href='tel:'+cfg.e;
   sos.firstChild.textContent='🚨 Emergency: call '+cfg.e;
