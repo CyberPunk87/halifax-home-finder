@@ -17,20 +17,28 @@ main{max-width:480px;margin:0 auto}
 h1{font-family:"Iowan Old Style",Georgia,serif;font-size:28px;margin:8px 0 2px}
 .sub{color:var(--mute);font-size:14px;margin:0 0 18px}
 .btns{display:grid;gap:12px}
-button.big{width:100%;min-height:68px;padding:12px 16px;border:0;border-radius:18px;font:inherit;font-size:20px;font-weight:600;color:#fff;cursor:pointer;text-align:left;box-shadow:0 2px 0 rgba(0,0,0,.18)}
-button.big:active{transform:translateY(1px)}
-button.big:disabled{opacity:.55}
-button.big:focus-visible{outline:4px solid #6aa9d8;outline-offset:2px}
+.big{display:block;width:100%;min-height:68px;padding:12px 16px;border:0;border-radius:18px;font:inherit;font-size:20px;font-weight:600;color:#fff;cursor:pointer;text-align:left;text-decoration:none;box-shadow:0 2px 0 rgba(0,0,0,.18)}
+.big:active{transform:translateY(1px)}
+.big:disabled{opacity:.55}
+.big:focus-visible,.mid:focus-visible{outline:4px solid #6aa9d8;outline-offset:2px}
 .c0{background:#1f7a7a}.c1{background:#2f6db5}.c2{background:#2e7d32}.c3{background:#8a5a14}.c4{background:#6a4c9a}.c5{background:#00698f}.c6{background:#7a3b6e}.c7{background:#4a5b68}
-button.help{background:#b3261e;margin-top:6px}
+.help{background:#b3261e;margin-top:6px}
+.sos{background:#7a0d0d;border:3px solid #fff;margin-top:22px;font-size:22px;box-shadow:0 0 0 3px #b3261e}
+.sos small{display:block;font-size:14px;font-weight:500;opacity:.9}
 #status{margin:18px 0 6px;min-height:48px;padding:12px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line);font-size:16px}
 #status.ok{border-color:#2e7d32}
 #status.err{border-color:#b3261e;color:#b3261e}
 h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.mid{min-height:56px;border:2px solid #1f7a7a;border-radius:14px;background:var(--card);color:var(--ink);font:inherit;font-size:18px;font-weight:600;cursor:pointer}
+#livebox{padding:14px;border-radius:14px;background:var(--card);border:2px solid #2e7d32;font-size:16px}
+#livebox .warn{color:#b3261e}
+#livebox button{margin-top:10px;min-height:48px;padding:8px 16px;border-radius:12px;border:2px solid #b3261e;background:var(--card);color:#b3261e;font:inherit;font-weight:600;cursor:pointer}
 #hist{list-style:none;margin:0;padding:0;font-size:15px}
 #hist li{padding:8px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
 #hist li span:last-child{color:var(--mute);white-space:nowrap}
 .note{color:var(--mute);font-size:13px;margin-top:20px}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -38,6 +46,22 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
   <h1 id="hello">Check in</h1>
   <p class="sub" id="sub">Tap a button to let your family know.</p>
   <div class="btns" id="btns"></div>
+
+  <section id="livewrap" hidden>
+    <h2>Share live location</h2>
+    <div id="livepick" class="row3">
+      <button class="mid" data-min="15">15 min</button>
+      <button class="mid" data-min="30">30 min</button>
+      <button class="mid" data-min="60">1 hour</button>
+    </div>
+    <div id="livebox" hidden role="status">
+      <div id="liveinfo"></div>
+      <button id="liveStop">Stop sharing</button>
+    </div>
+  </section>
+
+  <a class="big sos" id="call911" href="tel:911" hidden>🚨 Emergency: call 911<small>Police · Ambulance · Fire</small></a>
+
   <div id="status" role="status" aria-live="polite"></div>
   <h2>Recent</h2>
   <ul id="hist"></ul>
@@ -50,65 +74,166 @@ let cfg=null;
 try{
   const q=new URLSearchParams(location.hash.slice(1));
   if(q.get('t')){
-    cfg={t:q.get('t'),n:q.get('n')||'',l:q.get('l')!=='0',b:(q.get('b')||'').split('|').map(s=>s.trim()).filter(Boolean)};
+    cfg={t:q.get('t'),n:q.get('n')||'',l:q.get('l')!=='0',e:q.get('e')||'911',b:(q.get('b')||'').split('|').map(s=>s.trim()).filter(Boolean)};
     try{localStorage.setItem('hx_kid',JSON.stringify(cfg))}catch(e){}
   }else{
     try{cfg=JSON.parse(localStorage.getItem('hx_kid'))}catch(e){}
   }
 }catch(e){}
+if(cfg&&!/^\+?\d{3,15}$/.test(cfg.e||''))cfg.e='911';
 const statusEl=$('#status');
 function say(text,kind){statusEl.textContent=text;statusEl.className=kind||''}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clock=()=>new Date().toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
+const famUrl=()=>new URL('family.html',location.href).href.split('#')[0];
+const mapLink=(la,lo)=>'https://maps.google.com/?q='+la.toFixed(6)+','+lo.toFixed(6);
 let hist=[];try{hist=JSON.parse(localStorage.getItem('hx_kid_hist'))||[]}catch(e){}
+function addHist(label,loc){
+  hist.unshift({label,time:clock(),loc});hist=hist.slice(0,6);
+  try{localStorage.setItem('hx_kid_hist',JSON.stringify(hist))}catch(e){}
+  drawHist();
+}
 function drawHist(){
   $('#hist').innerHTML=hist.length?hist.map(h=>`<li><span>${esc(h.label)}${h.loc?'':' (no location)'}</span><span>${esc(h.time)}</span></li>`).join(''):'<li><span>Nothing yet</span><span></span></li>';
 }
-async function ntfySend(topic,title,message,click,priority){
+/* Sends through ntfy.sh. Tries a rich message first, then a plain one. */
+async function ntfySend(topic,title,message,click,priority,keep){
   try{
-    const r=await fetch('https://ntfy.sh/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,title,message,click:click||undefined,priority:priority||3})});
+    const r=await fetch('https://ntfy.sh/',{method:'POST',keepalive:!!keep,headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,title,message,click:click||undefined,priority:priority||3})});
     if(r.ok)return true;
   }catch(e){}
-  const r2=await fetch('https://ntfy.sh/'+encodeURIComponent(topic),{method:'POST',body:title+'\n'+message+(click?'\n'+click:'')});
+  const r2=await fetch('https://ntfy.sh/'+encodeURIComponent(topic),{method:'POST',keepalive:!!keep,body:title+'\n'+message+(click?'\n'+click:'')});
   return r2.ok;
 }
+let lastPos=null;
+function remember(c){lastPos={lat:c.latitude,lon:c.longitude,acc:c.accuracy,t:Date.now()}}
 function getPos(){
   return new Promise(res=>{
     if(!navigator.geolocation)return res(null);
-    navigator.geolocation.getCurrentPosition(p=>res(p.coords),()=>res(null),{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
+    navigator.geolocation.getCurrentPosition(p=>{remember(p.coords);res(p.coords)},()=>res(null),{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
   });
 }
+
+/* ----- one-tap check-ins ----- */
 let busy=false;
 async function checkin(label,urgent){
   if(busy)return;busy=true;
-  document.querySelectorAll('button.big').forEach(b=>b.disabled=true);
+  document.querySelectorAll('#btns .big').forEach(b=>b.disabled=true);
   try{
     let pos=null;
     if(cfg.l){say('Getting your location…');pos=await getPos()}
     say('Sending…');
-    const time=new Date().toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
-    const who=cfg.n||'Check-in';
+    const time=clock(),who=cfg.n||'Check-in';
     let msg=time,click='';
     if(pos){
-      click='https://maps.google.com/?q='+pos.latitude.toFixed(6)+','+pos.longitude.toFixed(6);
+      click=mapLink(pos.latitude,pos.longitude);
       msg+=' · location accurate to about '+Math.max(5,Math.round(pos.accuracy))+' m\nMap: '+click;
     }else{
       msg+=cfg.l?' · location unavailable':' · location not shared';
     }
-    const ok=await ntfySend(cfg.t,who+': '+label,msg,click,urgent?5:3);
-    if(!ok)throw new Error('send failed');
-    hist.unshift({label,time,loc:!!pos});hist=hist.slice(0,6);
-    try{localStorage.setItem('hx_kid_hist',JSON.stringify(hist))}catch(e){}
-    drawHist();
+    if(!await ntfySend(cfg.t,who+': '+label,msg,click,urgent?5:3))throw new Error('send failed');
+    addHist(label,!!pos);
     say('✓ Sent at '+time+(pos?'':' — without your location'),'ok');
   }catch(e){
     console.error(e);
     say('Couldn’t send. Check your internet and try again.','err');
   }finally{
-    busy=false;document.querySelectorAll('button.big').forEach(b=>b.disabled=false);
+    busy=false;document.querySelectorAll('#btns .big').forEach(b=>b.disabled=false);
   }
 }
+
+/* ----- live location for a set number of minutes ----- */
+const LQ_KEY='hx_live_q';
+let lq=[];try{lq=JSON.parse(localStorage.getItem(LQ_KEY))||[]}catch(e){}
+const saveQ=()=>{try{localStorage.setItem(LQ_KEY,JSON.stringify(lq.slice(-150)))}catch(e){}};
+let live=null,flushing=false;
+async function flush(){
+  if(flushing||!lq.length)return;
+  flushing=true;
+  try{
+    while(lq.length){
+      if(!await ntfySend(cfg.t+'-live',cfg.n||'Child',JSON.stringify(lq[0]),'',1))break;
+      lq.shift();saveQ();if(live)live.sent++;
+    }
+  }catch(e){/* no internet: keep the saved positions and try again later */}
+  flushing=false;renderLive();
+}
+function queuePoint(c){
+  live.lastSent=Date.now();
+  lq.push({n:cfg.n||'Child',la:+c.latitude.toFixed(6),lo:+c.longitude.toFixed(6),a:Math.round(c.accuracy||0),ts:Date.now(),end:live.end});
+  saveQ();flush();renderLive();
+}
+function onPos(p){
+  if(!live)return;
+  remember(p.coords);live.last=p.coords;
+  if(Date.now()-live.lastSent>=30000)queuePoint(p.coords);
+  else renderLive();
+}
+function tick(){
+  if(!live)return;
+  const now=Date.now();
+  if(now>=live.end){stopLive(false);return}
+  if(live.last&&now-live.lastSent>=60000)queuePoint(live.last);
+  if(lq.length&&!flushing)flush();
+  renderLive();
+}
+async function requestWake(){try{if(live&&navigator.wakeLock)live.wake=await navigator.wakeLock.request('screen')}catch(e){}}
+function startLive(min){
+  if(live||!cfg.l)return;
+  if(!navigator.geolocation){say('This phone can’t share its location.','err');return}
+  live={end:Date.now()+min*60000,lastSent:0,last:null,sent:0,wake:null,hiddenAt:0};
+  live.watch=navigator.geolocation.watchPosition(onPos,err=>{
+    if(err&&err.code===1){say('Location is turned off for this page. Turn it on in your phone’s Settings to share.','err');stopLive(true)}
+  },{enableHighAccuracy:true,maximumAge:5000,timeout:30000});
+  live.timer=setInterval(tick,5000);
+  requestWake();renderLive();
+  ntfySend(cfg.t,(cfg.n||'Check-in')+': 📡 sharing live location','Live for '+min+' min. Open the Family page to follow along.',famUrl(),3).catch(()=>{});
+  say('Live sharing started. Keep this screen open.','ok');
+}
+function stopLive(byUser){
+  if(!live)return;
+  try{navigator.geolocation.clearWatch(live.watch)}catch(e){}
+  clearInterval(live.timer);
+  try{live.wake&&live.wake.release()}catch(e){}
+  lq.push({n:cfg.n||'Child',stop:1,ts:Date.now()});saveQ();
+  live=null;flush();renderLive();
+  say(byUser?'Live sharing stopped.':'Live sharing finished.','ok');
+}
+function renderLive(){
+  const box=$('#livebox'),pick=$('#livepick');
+  if(!live){box.hidden=true;pick.hidden=false;return}
+  pick.hidden=true;box.hidden=false;
+  const left=Math.max(0,Math.ceil((live.end-Date.now())/60000));
+  $('#liveinfo').innerHTML='<b>📡 Sharing live location</b><br>'+left+' min left · '+live.sent+' updates sent'
+    +(lq.length?' · '+lq.length+' waiting to send':'')
+    +(live.last?'':'<br>Finding your location…')
+    +(!navigator.onLine?'<br><span class="warn">No internet right now. Your position is being saved and will be sent when you’re back online.</span>':'')
+    +'<br><small>Keep this screen open. Sharing pauses if the phone locks or you switch apps.</small>';
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!live)return;
+  if(document.hidden){live.hiddenAt=Date.now();return}
+  if(live.hiddenAt&&Date.now()-live.hiddenAt>20000)say('The screen was off for a while, so sharing may have paused. Keep this screen open.','err');
+  live.hiddenAt=0;requestWake();tick();
+});
+window.addEventListener('online',()=>{flush();renderLive()});
+window.addEventListener('offline',renderLive);
+
+/* ----- emergency ----- */
+function emergencyAlert(){
+  const who=cfg.n||'Check-in',time=clock();
+  let msg=time+' · tapped the '+cfg.e+' button',click='';
+  if(lastPos&&Date.now()-lastPos.t<15*60000){
+    const age=Math.round((Date.now()-lastPos.t)/60000);
+    click=mapLink(lastPos.lat,lastPos.lon);
+    msg+='\nLast known location'+(age>0?' ('+age+' min ago)':'')+': '+click;
+  }else msg+='\nLocation unavailable';
+  ntfySend(cfg.t,who+': 🚨 tapped the '+cfg.e+' emergency button',msg,click,5,true).catch(()=>{});
+  addHist('🚨 '+cfg.e+' button',!!click);
+}
+
+/* ----- start-up ----- */
 if(!cfg||!cfg.t){
-  $('#hello').textContent='Check in';
   $('#sub').textContent='This link is missing its details. Ask a parent to send you the check-in link again.';
 }else{
   $('#hello').textContent=cfg.n?'Hi '+cfg.n:'Check in';
@@ -119,7 +244,22 @@ if(!cfg||!cfg.t){
     if(b.dataset.help)checkin('🆘 Needs help, please call',true);
     else checkin(labels[+b.dataset.i],false);
   };
-  $('#note').textContent=cfg.l?'Each tap sends your name, the time and where you are to your family. Your phone will ask permission to share your location the first time.':'Each tap sends your name and the time to your family.';
+  if(cfg.l){
+    $('#livewrap').hidden=false;
+    $('#livepick').onclick=e=>{const b=e.target.closest('button');if(b)startLive(+b.dataset.min)};
+    $('#liveStop').onclick=()=>stopLive(true);
+    setTimeout(getPos,800);
+    setInterval(()=>{if(!document.hidden&&!live)getPos()},120000);
+  }
+  const sos=$('#call911');
+  sos.href='tel:'+cfg.e;
+  sos.firstChild.textContent='🚨 Emergency: call '+cfg.e;
+  sos.hidden=false;
+  sos.addEventListener('click',emergencyAlert);
+  $('#note').textContent=cfg.l
+    ?'Each tap sends your name, the time and where you are to your family. While this page is open it keeps a recent location ready for emergencies. Your phone asks permission to share your location the first time. Live sharing only works while this page stays open with the screen on.'
+    :'Each tap sends your name and the time to your family.';
+  if(lq.length)flush();
 }
 drawHist();
 window.addEventListener('hashchange',()=>location.reload());

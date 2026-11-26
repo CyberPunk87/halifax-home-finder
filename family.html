@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Family</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--ink:#12263a;--bg:#eef1f2;--card:#fff;--line:#d5dde1;--mute:#5d6f7e;--bad:#b3261e;--good:#2e7d32}
+@media (prefers-color-scheme:dark){:root{--ink:#eef1f2;--bg:#0f1b27;--card:#172635;--line:#2a3d4f;--mute:#9db0bf;--bad:#ff8a80;--good:#7ed07f}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--bg)}
+main{max-width:860px;margin:0 auto;padding:16px 16px 40px}
+h1,h2{font-family:"Iowan Old Style",Georgia,serif;margin:0}
+h1{font-size:26px}
+h2{font-size:19px;margin-bottom:8px}
+a{color:inherit}
+.top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:16px}
+#map{height:48vh;min-height:300px;border-radius:10px;border:1px solid var(--line)}
+.kid{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.kid:first-child{border-top:0}
+.kid b{display:block}
+.pill{display:inline-block;padding:1px 9px;border-radius:10px;font-size:12.5px;color:#fff;background:#78909c}
+.pill.live{background:#2e7d32}.pill.alert{background:#b3261e}
+.mute{color:var(--mute);font-size:13px}
+.err{color:var(--bad)}
+ul.feed{list-style:none;margin:0;padding:0}
+ul.feed li{padding:8px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
+ul.feed li:first-child{border-top:0}
+ul.feed .urgent{color:var(--bad);font-weight:700}
+label{display:block;margin:10px 0 3px;font-weight:600;font-size:13px}
+input,textarea{width:100%;font:inherit;padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.chk{display:flex;gap:8px;align-items:center;font-weight:400}.chk input{width:auto}
+button{font:inherit;cursor:pointer;margin-top:10px;margin-right:6px;padding:8px 13px;border-radius:8px;border:1px solid var(--ink);background:var(--card);color:var(--ink)}
+button.pri{background:var(--ink);color:var(--card)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #6aa9d8;outline-offset:1px}
+summary{cursor:pointer;font-family:"Iowan Old Style",Georgia,serif;font-size:19px;font-weight:700}
+.btnrow{display:flex;flex-wrap:wrap;align-items:center}
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>Family</h1><a href="index.html">← Halifax Home Finder</a></div>
+
+  <section class="card">
+    <h2>Live view</h2>
+    <div id="map" role="img" aria-label="Map of your family’s check-ins and live locations"></div>
+    <div class="btnrow"><button id="refresh">Refresh now</button><button id="fit">Show everyone</button><span class="mute" id="upd"></span></div>
+    <div id="kids" style="margin-top:10px"></div>
+    <div class="mute">The map updates every 15 seconds while this page is open. Live locations appear only while a child has sharing turned on and their screen open.</div>
+  </section>
+
+  <section class="card">
+    <h2>Recent activity</h2>
+    <ul class="feed" id="feed"><li><span class="mute">Loading…</span></li></ul>
+  </section>
+
+  <details class="card" id="setup" open>
+    <summary>Set up</summary>
+    <p class="mute">1. Install the free <b>ntfy</b> app on your phone and subscribe to the topic below, so check-ins arrive as notifications.<br>2. Press “Send a test notification”.<br>3. Make a link for each child, send it to them, and ask them to open it and choose Add to Home Screen.</p>
+    <label for="topic">Family topic (treat it like a password)</label>
+    <input id="topic" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="mute">On a second parent’s device, paste the same topic here so you both see the same map.</div>
+    <button id="test">Send a test notification</button> <span class="mute" id="testMsg"></span>
+
+    <label for="name">Child’s name</label>
+    <input id="name" placeholder="e.g. Sara">
+    <label for="btns">Buttons (one per line, up to 8)</label>
+    <textarea id="btns" rows="5">🏫 Got to school
+🚪 Leaving school
+🏠 Home safe
+👋 Going out
+🚶 Walking home</textarea>
+    <label for="emg">Emergency number</label>
+    <input id="emg" value="911" inputmode="tel">
+    <div class="mute">In Canada, 911 reaches police, ambulance and fire. The red button opens the phone’s dialer and alerts you.</div>
+    <label class="chk"><input type="checkbox" id="loc" checked> Include their location (needed for live sharing)</label>
+    <button class="pri" id="make">Make the link</button>
+    <input id="link" readonly style="margin-top:8px" placeholder="The link appears here">
+    <button id="copy">Copy link</button>
+    <div class="mute" id="linkMsg"></div>
+    <p class="mute"><b>Privacy.</b> Anyone who learns the topic can read these messages and send fake ones, so only give the link to your children and never post it. ntfy.sh keeps messages for about 12 hours. Children see a note on their page that taps share their location. Live sharing only works while their page stays open with the screen on; a web page can’t track in the background. For all-day tracking, use Find My (iPhone) or Google Maps location sharing.</p>
+  </details>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hhmm=ms=>new Date(ms).toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'});
+const ago=ms=>{const m=Math.max(0,Math.round((Date.now()-ms)/60000));return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'};
+const mapUrl=(la,lo)=>'https://maps.google.com/?q='+la.toFixed(6)+','+lo.toFixed(6);
+
+/* ---------- topic ---------- */
+const rand=()=>{const a=new Uint8Array(18),ch='abcdefghijklmnopqrstuvwxyz0123456789';crypto.getRandomValues(a);return 'halifax-family-'+[...a].map(b=>ch[b%36]).join('')};
+let topic='';try{topic=localStorage.getItem('hx_fam_topic')||''}catch(e){}
+if(!topic){topic=rand();try{localStorage.setItem('hx_fam_topic',topic)}catch(e){}}
+$('#topic').value=topic;
+$('#topic').onchange=e=>{
+  topic=e.target.value.replace(/[^A-Za-z0-9_-]/g,'')||rand();
+  e.target.value=topic;
+  try{localStorage.setItem('hx_fam_topic',topic)}catch(x){}
+  fitted=false;refresh();
+};
+try{if(localStorage.getItem('hx_fam_setup_done'))$('#setup').open=false}catch(e){}
+
+/* ---------- sending (test) and link making ---------- */
+async function ntfySend(t,title,message,click,priority){
+  try{
+    const r=await fetch('https://ntfy.sh/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:t,title,message,click:click||undefined,priority:priority||3})});
+    if(r.ok)return true;
+  }catch(e){}
+  const r2=await fetch('https://ntfy.sh/'+encodeURIComponent(t),{method:'POST',body:title+'\n'+message+(click?'\n'+click:'')});
+  return r2.ok;
+}
+$('#test').onclick=async()=>{
+  const m=$('#testMsg');m.className='mute';m.textContent='Sending…';
+  try{
+    if(!await ntfySend(topic,'Family test','If you can read this, check-ins will reach you.','',3))throw new Error('refused');
+    m.textContent='Sent. It should arrive within a few seconds.';
+  }catch(e){console.error(e);m.className='err';m.textContent='Couldn’t send. Check your internet connection.'}
+};
+function build(){
+  const name=$('#name').value.trim(),m=$('#linkMsg');
+  if(!name){m.className='err';m.textContent='Enter the child’s name first.';return ''}
+  const labels=$('#btns').value.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,8).map(s=>s.replace(/\|/g,' '));
+  const emg=$('#emg').value.replace(/[^\d+]/g,'')||'911';
+  const base=new URL('checkin.html',location.href).href.split('#')[0];
+  const link=base+'#t='+encodeURIComponent(topic)+'&n='+encodeURIComponent(name)+'&l='+($('#loc').checked?1:0)+'&e='+encodeURIComponent(emg)+(labels.length?'&b='+encodeURIComponent(labels.join('|')):'');
+  m.className='mute';
+  m.textContent=location.protocol==='file:'?'This copy is opened from a file, so the link would only work on this computer. Open this page from your hosted (github.io) address.':'Send this link to '+name+'. On their phone: open it, then choose Add to Home Screen.';
+  try{localStorage.setItem('hx_fam_setup_done','1')}catch(e){}
+  return link;
+}
+$('#make').onclick=()=>{$('#link').value=build()};
+$('#copy').onclick=async()=>{
+  const el=$('#link');if(!el.value)el.value=build();if(!el.value)return;
+  try{await navigator.clipboard.writeText(el.value);$('#linkMsg').className='mute';$('#linkMsg').textContent='Link copied.'}
+  catch(e){el.focus();el.select();$('#linkMsg').className='mute';$('#linkMsg').textContent='Select and copy the link above.'}
+};
+
+/* ---------- map ---------- */
+const map=L.map('map').setView([44.65,-63.58],11);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,attribution:'Tiles © Esri'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:16}).addTo(map);
+const layer=L.layerGroup().addTo(map);
+let fitted=false,allPts=[];
+$('#fit').onclick=()=>{if(allPts.length)map.fitBounds(L.latLngBounds(allPts).pad(.25),{maxZoom:16})};
+
+/* ---------- reading from ntfy ---------- */
+async function pull(t){
+  const r=await fetch('https://ntfy.sh/'+encodeURIComponent(t)+'/json?poll=1&since=6h');
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return (await r.text()).split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch(e){return null}}).filter(m=>m&&m.event==='message');
+}
+function parseLive(m){
+  const t=m.message||'',i=t.indexOf('{'),j=t.lastIndexOf('}');
+  if(i<0||j<i)return null;
+  try{
+    const p=JSON.parse(t.slice(i,j+1)),o={n:String(p.n||m.title||'').slice(0,40),ts:+p.ts||(m.time||0)*1000,end:+p.end||0,stop:!!p.stop};
+    if(!o.n)return null;
+    if(!o.stop){
+      const la=+p.la,lo=+p.lo;
+      if(!(la>=-90&&la<=90&&lo>=-180&&lo<=180))return null;
+      o.la=la;o.lo=lo;
+    }
+    return o;
+  }catch(e){return null}
+}
+function parseCheck(m){
+  const mm=/q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/.exec((m.click||'')+' '+(m.message||''));
+  const la=mm&&+mm[1],lo=mm&&+mm[2];
+  return {title:String(m.title||m.message||'').slice(0,120),ts:(m.time||0)*1000,urgent:(m.priority||3)>=5,la:mm&&la>=-90&&la<=90?la:null,lo:mm&&lo>=-180&&lo<=180?lo:null};
+}
+function draw(checkMsgs,liveMsgs){
+  layer.clearLayers();allPts=[];
+  const now=Date.now(),byKid={};
+  liveMsgs.map(parseLive).filter(Boolean).forEach(p=>(byKid[p.n]=byKid[p.n]||[]).push(p));
+  const kids=[];
+  Object.entries(byKid).forEach(([n,pts])=>{
+    pts.sort((a,b)=>a.ts-b.ts);
+    const last=pts[pts.length-1],fixes=pts.filter(p=>!p.stop);
+    const lastFix=fixes[fixes.length-1];
+    let state,cls='';
+    if(last.stop){state='Stopped sharing '+ago(last.ts)}
+    else if(last.end&&now>last.end+60000&&now-last.ts>120000){state='Sharing ended '+ago(last.end)}
+    else if(now-last.ts<=150000){state='Live · updated '+ago(last.ts);cls='live'}
+    else{state='Last seen '+ago(last.ts)+' (phone may be locked or offline)'}
+    if(lastFix){
+      const col=cls?'#2e7d32':'#78909c';
+      const trail=fixes.filter(p=>p.ts>now-2*3600e3).map(p=>[p.la,p.lo]);
+      if(trail.length>1)L.polyline(trail,{color:col,weight:3,opacity:.7}).addTo(layer);
+      L.circleMarker([lastFix.la,lastFix.lo],{radius:11,color:'#fff',weight:2,fillColor:col,fillOpacity:1}).bindTooltip(esc(n)+' · '+esc(hhmm(lastFix.ts)),{permanent:true,direction:'top',offset:[0,-8]}).addTo(layer);
+      allPts.push([lastFix.la,lastFix.lo]);
+    }
+    kids.push({n,state,cls,fix:lastFix});
+  });
+  $('#kids').innerHTML=kids.length?kids.map(k=>`<div class="kid"><div><b>${esc(k.n)}</b><span class="mute">${esc(k.state)}</span></div><div>${k.fix?`<a href="${mapUrl(k.fix.la,k.fix.lo)}" target="_blank" rel="noopener">Open in Maps</a> `:''}<span class="pill ${k.cls}">${k.cls?'LIVE':'not live'}</span></div></div>`).join(''):'<div class="mute">Nobody is sharing live right now.</div>';
+
+  const checks=checkMsgs.map(parseCheck).sort((a,b)=>b.ts-a.ts);
+  checks.forEach(c=>{
+    if(c.la===null)return;
+    L.circleMarker([c.la,c.lo],{radius:7,color:'#fff',weight:2,fillColor:c.urgent?'#b3261e':'#1565c0',fillOpacity:.95}).bindTooltip(esc(c.title)+' · '+esc(hhmm(c.ts))).addTo(layer);
+    allPts.push([c.la,c.lo]);
+  });
+  $('#feed').innerHTML=checks.length?checks.slice(0,25).map(c=>`<li><span class="${c.urgent?'urgent':''}">${esc(c.title)}${c.la!==null?` · <a href="${mapUrl(c.la,c.lo)}" target="_blank" rel="noopener">map</a>`:''}</span><span class="mute">${esc(hhmm(c.ts))} · ${esc(ago(c.ts))}</span></li>`).join(''):'<li><span class="mute">No check-ins in the last 6 hours.</span></li>';
+  if(!fitted&&allPts.length){fitted=true;$('#fit').click()}
+}
+let busy=false;
+async function refresh(){
+  if(busy)return;busy=true;
+  const st=$('#upd');
+  try{
+    const [a,b]=await Promise.all([pull(topic),pull(topic+'-live')]);
+    draw(a,b);
+    st.className='mute';st.textContent='Updated '+hhmm(Date.now());
+  }catch(e){
+    console.error(e);
+    st.className='err';st.textContent='Couldn’t reach ntfy.sh ('+e.message+'). Will retry.';
+  }finally{busy=false}
+}
+$('#refresh').onclick=refresh;
+setInterval(()=>{if(!document.hidden)refresh()},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+refresh();
+</script>
+</body>
+</html>
