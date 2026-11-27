@@ -56,6 +56,9 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
 .ecin .mid{width:100%;margin:8px 0}
 .ecin a.big{margin:8px 0}
 .ectext{font-size:18px;white-space:pre-line}
+#offbar{margin:12px 0 0;padding:10px 14px;border-radius:12px;background:#fff4e5;border:2px solid #8a5a14;color:#4a3000;font-size:15px}
+#smsbox{margin-top:10px}
+#smsbox .big,#ecSms .big{margin:8px 0}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -102,7 +105,11 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
 
   <a class="big sos" id="call911" href="tel:911" hidden>🚨 Emergency: call 911<small>Police · Ambulance · Fire</small></a>
 
+  <p class="note" id="offnote" style="margin:8px 0 0">No data, Wi-Fi or credit? Calls to 911 are free and use any mobile network that’s in range. If you can’t call, use the Emergency card to see where you are, then text someone.</p>
+
   <div id="status" role="status" aria-live="polite"></div>
+  <div id="offbar" role="status" hidden></div>
+  <div id="smsbox" hidden></div>
   <h2>Recent</h2>
   <ul id="hist"></ul>
   <p class="note" id="note"></p>
@@ -119,6 +126,7 @@ h2{font-size:14px;color:var(--mute);margin:22px 0 6px;font-weight:600;text-trans
     <div id="ecMedWrap" hidden><h2>Medical information</h2><div class="ectext" id="ecMed"></div></div>
     <div id="ecHomeWrap" hidden><h2>My home address</h2><div class="ectext" id="ecHome"></div></div>
     <div id="ecPhonesWrap" hidden><h2>Call my family</h2><div id="ecPhones"></div></div>
+    <div id="ecSmsWrap" hidden><h2>Text my family</h2><div id="ecSms"></div><p class="note" style="margin-top:0">Texts work without internet if you have a signal and can send texts on your plan. Your location is filled in for you.</p></div>
     <a class="big sos" id="ecCall" href="tel:911">🚨 Call 911</a>
     <p class="note">This card stays on your phone. Nothing here is sent anywhere. The address comes from your phone’s GPS, which can be off by a block or more, so tell them what you can see around you too.</p>
   </div>
@@ -172,6 +180,54 @@ function getPos(maxAge){
   });
 }
 
+/* ----- no internet: save messages and send them later; offer a text message ----- */
+const PQ_KEY='hx_pending';
+let pq=[];try{pq=JSON.parse(localStorage.getItem(PQ_KEY))||[]}catch(e){}
+const savePQ=()=>{try{localStorage.setItem(PQ_KEY,JSON.stringify(pq.slice(-20)))}catch(e){}};
+let flushingP=false;
+function queueMsg(title,message,click,priority){pq.push({title,message,click,priority,ts:Date.now()});savePQ();renderOffline()}
+async function flushPending(){
+  if(flushingP||!pq.length||!cfg||!cfg.t)return;
+  flushingP=true;
+  try{
+    while(pq.length){
+      const m=pq[0],late=Math.round((Date.now()-m.ts)/60000);
+      const msg=m.message+(late>=1?'\n(Sent late: this was tapped at '+clock(m.ts)+', '+late+' min ago.)':'');
+      if(!await ntfySend(cfg.t,m.title,msg,m.click,m.priority))break;
+      pq.shift();savePQ();
+    }
+  }catch(e){/* still offline: try again later */}
+  flushingP=false;renderOffline();
+}
+function renderOffline(){
+  const bar=$('#offbar'),off=navigator.onLine===false;
+  if(!pq.length)$('#smsbox').hidden=true;
+  if(!pq.length&&!off){bar.hidden=true;return}
+  bar.hidden=false;
+  bar.textContent=(off?'📴 No internet. ':'')+(pq.length?pq.length+' message'+(pq.length>1?'s':'')+' waiting to send. They go out by themselves when you’re back online. ':'')+'The emergency button and Emergency card still work.';
+}
+function parents(){
+  return (cfg.p||[]).map(l=>{
+    const m=/\+?\d[\d\s().-]{5,}\d/.exec(l);
+    return m?{name:l.replace(m[0],'').replace(/[:–-]\s*$/,'').trim()||'a parent',num:m[0].replace(/[^\d+]/g,'')}:null;
+  }).filter(Boolean);
+}
+const smsHref=(num,body)=>'sms:'+num+'?&body='+encodeURIComponent(body);
+function showSmsOffer(label,pos){
+  const ps=parents(),box=$('#smsbox');
+  if(!ps.length){box.hidden=true;return}
+  const body=(cfg.n||'Me')+': '+label+' at '+clock()+(pos?' - I am here: '+mapLink(pos.latitude,pos.longitude):'')+' (texting because I have no internet)';
+  box.innerHTML='<p class="note" style="margin:0 0 4px">Texts work without internet if you have a signal and can send texts on your plan:</p>'+ps.map(p=>`<a class="big c1" href="${esc(smsHref(p.num,body))}">💬 Text ${esc(p.name)}</a>`).join('');
+  box.hidden=false;
+}
+function setEcSms(pos,addr){
+  const ps=parents(),wrap=$('#ecSmsWrap');
+  if(!ps.length||!pos){wrap.hidden=true;return}
+  const body=(cfg.n||'I')+' needs help. Location: '+mapLink(pos.latitude,pos.longitude)+(addr?' ('+addr+')':'')+' · sent '+clock();
+  $('#ecSms').innerHTML=ps.map(p=>`<a class="big c1" href="${esc(smsHref(p.num,body))}">💬 Text ${esc(p.name)} my location</a>`).join('');
+  wrap.hidden=false;
+}
+
 /* ----- one-tap check-ins ----- */
 let busy=false;
 async function checkin(label,urgent){
@@ -189,7 +245,16 @@ async function checkin(label,urgent){
     }else{
       msg+=cfg.l?' · location unavailable':' · location not shared';
     }
-    if(!await ntfySend(cfg.t,who+': '+label,msg,click,urgent?5:3))throw new Error('send failed');
+    let sent=false;
+    try{sent=await ntfySend(cfg.t,who+': '+label,msg,click,urgent?5:3)}catch(e){console.error(e)}
+    if(!sent){
+      queueMsg(who+': '+label,msg,click,urgent?5:3);
+      addHist(label+' (waiting to send)',!!pos);
+      say('No internet right now. Your message is saved and will send by itself when you’re back online.','err');
+      showSmsOffer(label,pos);
+      return;
+    }
+    $('#smsbox').hidden=true;
     addHist(label,!!pos);
     say('✓ Sent at '+time+(pos?'':' — without your location')+(timer&&Date.now()<timer.end?'. Your safety timer is still running: tap “I’m safe” when you arrive.':''),'ok');
   }catch(e){
@@ -286,7 +351,9 @@ function emergencyAlert(){
     click=mapLink(lastPos.lat,lastPos.lon);
     msg+='\nLast known location'+(age>0?' ('+age+' min ago)':'')+': '+click;
   }else msg+='\nLocation unavailable';
-  ntfySend(cfg.t,who+': 🚨 tapped the '+cfg.e+' emergency button',msg,click,5,true).catch(()=>{});
+  const item={title:who+': 🚨 tapped the '+cfg.e+' emergency button',message:msg,click,priority:5,ts:Date.now()};
+  pq.push(item);savePQ();renderOffline();
+  ntfySend(cfg.t,item.title,item.message,item.click,5,true).then(ok=>{if(ok){pq=pq.filter(x=>x!==item);savePQ();renderOffline()}}).catch(()=>{});
   addHist('🚨 '+cfg.e+' button',!!click);
 }
 
@@ -371,10 +438,12 @@ async function ecUpdate(){
     const pos=await getPos(10000);
     if(!pos){addrEl.textContent='I can’t get my location right now.'+cached();return}
     coordEl.textContent=pos.latitude.toFixed(5)+', '+pos.longitude.toFixed(5)+' · accurate to about '+Math.max(5,Math.round(pos.accuracy))+' m · '+clock();
+    setEcSms(pos,'');
     try{
       const r=await reverseGeocode(pos.latitude,pos.longitude);
       if(!r.text)throw new Error('no address');
       addrEl.textContent=(r.exact?'':'Near ')+r.text;
+      setEcSms(pos,addrEl.textContent);
       addrCache={text:(r.exact?'':'Near ')+r.text,t:Date.now()};
       try{localStorage.setItem('hx_kid_addr',JSON.stringify(addrCache))}catch(e){}
     }catch(e){
@@ -411,6 +480,12 @@ function closeCard(){
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#ecard').hidden)closeCard()});
 
 /* ----- start-up ----- */
+if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
+  navigator.serviceWorker.register('sw.js').catch(e=>console.error('Offline support:',e));
+}
+window.addEventListener('online',()=>{renderOffline();flushPending()});
+window.addEventListener('offline',renderOffline);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){renderOffline();flushPending()}});
 if(!cfg||!cfg.t){
   $('#sub').textContent='This page doesn’t have your details yet. Paste the link your parent sent you below.';
   $('#recover').hidden=false;
@@ -452,6 +527,7 @@ if(!cfg||!cfg.t){
     ?'Each tap sends your name, the time and where you are to your family. While this page is open it keeps a recent location ready for emergencies. Your phone asks permission to share your location the first time. Live sharing only works while this page stays open with the screen on.'
     :'Each tap sends your name and the time to your family.';
   if(lq.length)flush();
+  renderOffline();flushPending();
 }
 drawHist();
 </script>
