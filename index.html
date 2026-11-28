@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/home-180.png">
 <link rel="icon" type="image/png" href="icons/home-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -652,6 +651,16 @@ try{
   }
 }catch(e){}
 $('#syncTok').value=syncTok;
+/* Extra copies of the token (cookie + IndexedDB), in case the phone clears localStorage but not the others */
+function idb(fn){return new Promise(res=>{try{const r=indexedDB.open('hx_keep',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onerror=()=>res(null);r.onsuccess=()=>{try{const st=r.result.transaction('k',fn.w?'readwrite':'readonly').objectStore('k');const q=fn(st);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null)}catch(e){res(null)}}}catch(e){res(null)}})}
+function backupTok(){if(!syncTok||!TOKEN_RE.test(syncTok))return;
+  try{document.cookie='hx_t='+encodeURIComponent(syncTok)+';max-age=31536000;path=/;SameSite=Strict;Secure'}catch(e){}
+  const f=st=>st.put(syncTok,'t');f.w=1;idb(f)}
+async function restoreTok(){if(syncTok)return;
+  let t=await idb(st=>st.get('t'));
+  if(!t){try{const m=document.cookie.match(/(?:^|; )hx_t=([^;]+)/);if(m)t=decodeURIComponent(m[1])}catch(e){}}
+  if(t&&TOKEN_RE.test(t)&&!syncTok){syncTok=t;try{localStorage.setItem('hx_sync_token',t)}catch(e){}
+    $('#syncTok').value=t;syncStatus('Token restored from a backup copy on this phone.');syncNow(true)}}
 const localUpdated=()=>{try{return +localStorage.getItem('hx_updated')||0}catch(e){return 0}};
 const setUpdated=n=>{try{localStorage.setItem('hx_updated',String(n))}catch(e){}};
 const ghHead=()=>({Authorization:'Bearer '+syncTok,Accept:'application/vnd.github+json','Content-Type':'application/json'});
@@ -712,6 +721,7 @@ $('#syncSave').onclick=()=>{
   syncTok=found?found[1]:raw.replace(/\s+/g,'');
   $('#syncTok').value=syncTok;gistId='';
   try{localStorage.setItem('hx_sync_token',syncTok);localStorage.removeItem('hx_gist_id')}catch(e){}
+  backupTok();
   if(!syncTok){syncStatus('Sync turned off on this device.');return}
   syncNow(false);
 };
@@ -725,7 +735,7 @@ $('#syncLink').onclick=async()=>{
 $('#syncNow').onclick=()=>{if(!syncTok){syncStatus('Paste your token and press “Turn on sync” first.',true);return}syncNow(false)};
 $('#syncShow').onchange=e=>{$('#syncTok').type=e.target.checked?'text':'password'};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncNow(true)});
-if(syncTok)syncNow(true);
+if(syncTok){backupTok();syncNow(true)}else restoreTok();
 
 /* ---------- Neighbourhood check for each home ---------- */
 const SC_M=500,SC_CLOSE=300,KY=110540;
