@@ -1001,7 +1001,7 @@ function drawRoute(school,x){
   const ll=x.rt.coords.map(c=>[c[1],c[0]]);
   L.polyline(ll,{color:'#1565c0',weight:5,opacity:.85,dashArray:x.rt.straight?'8 8':null}).addTo(routeLayer);
   L.circleMarker([school.lat,school.lon],{radius:9,color:'#fff',weight:2,fillColor:'#1565c0',fillOpacity:1}).bindTooltip(esc(school.name||'School')).addTo(routeLayer);
-  (x.D.crime||[]).slice(0,300).forEach(f=>{const c=f.geometry.coordinates;if(f.geometry.type==='Point')L.circleMarker([c[1],c[0]],{radius:3,color:'#8a1c1c',weight:1,fillColor:'#8a1c1c',fillOpacity:.8}).addTo(routeLayer)});
+  (x.D.crime||[]).slice(0,300).forEach(f=>{const c=f.geometry.coordinates;if(f.geometry.type==='Point'){const p=f.properties||{};const d=typeof p.evt_date==='number'?new Date(p.evt_date).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'}):'';const t=esc(p.rucr_ext_d||'Reported incident')+(p.location?'<br>'+esc(p.location):'')+(d?'<br><small>'+d+'</small>':'');L.circleMarker([c[1],c[0]],{radius:6,color:'#fff',weight:1,fillColor:'#8a1c1c',fillOpacity:.9}).bindPopup(t).bindTooltip(t.replace(/<br>|<small>|<\/small>/g,' · ')).addTo(routeLayer)}});
   (x.D.guards||[]).slice(0,40).forEach(f=>{const c=f.geometry.type==='Point'?f.geometry.coordinates:null;if(c)L.circleMarker([c[1],c[0]],{radius:6,color:'#fff',weight:1.5,fillColor:'#f9a825',fillOpacity:1}).bindTooltip('Crossing guard').addTo(routeLayer)});
   try{map.fitBounds(L.latLngBounds(ll).pad(.2))}catch(e){}
 }
