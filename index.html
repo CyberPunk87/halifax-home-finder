@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Home Finder">
 <meta name="theme-color" content="#12263a">
+<meta name="referrer" content="origin">
 <title>Halifax Home Finder</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
@@ -130,6 +131,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <label class="chk"><input type="checkbox" id="syncShow"> Show token</label>
     <button class="act alt" id="syncSave">Turn on sync</button>
     <button class="act alt" id="syncNow">Sync now</button>
+    <button class="act alt" id="syncLink">Make a link for my phone</button>
+    <input id="syncLinkOut" readonly hidden style="margin-top:8px">
+    <div class="msg">If your phone keeps forgetting the token, open this link on the phone and add the app to the Home Screen from there. The link carries the token, so it comes back by itself. It is secret: send it only to your own phone (for example by AirDrop or a note to yourself), never post or forward it.</div>
     <div class="msg" id="syncMsg"></div>
     <a class="famlink" href="family.html">👨‍👩‍👧 Family page: check-ins, live location, emergency →</a>
     <div id="saved"></div>
@@ -636,7 +640,17 @@ handleSave();
 /* ---------- Sync between devices (private GitHub Gist) ---------- */
 const GIST_FILE='halifax-home-finder.json';
 let syncTok='',gistId='',pushTimer=null,syncBusy=false;
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 try{syncTok=localStorage.getItem('hx_sync_token')||'';gistId=localStorage.getItem('hx_gist_id')||''}catch(e){}
+/* A phone link (…?sync=token) puts the token back even if the phone cleared its storage or the icon was re-added */
+const TOKEN_RE=/^(github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{36})$/;
+try{
+  const k=new URLSearchParams(location.search).get('sync');
+  if(k&&TOKEN_RE.test(k)&&k!==syncTok){
+    syncTok=k;gistId='';
+    try{localStorage.setItem('hx_sync_token',k);localStorage.removeItem('hx_gist_id')}catch(e){}
+  }
+}catch(e){}
 $('#syncTok').value=syncTok;
 const localUpdated=()=>{try{return +localStorage.getItem('hx_updated')||0}catch(e){return 0}};
 const setUpdated=n=>{try{localStorage.setItem('hx_updated',String(n))}catch(e){}};
@@ -700,6 +714,13 @@ $('#syncSave').onclick=()=>{
   try{localStorage.setItem('hx_sync_token',syncTok);localStorage.removeItem('hx_gist_id')}catch(e){}
   if(!syncTok){syncStatus('Sync turned off on this device.');return}
   syncNow(false);
+};
+$('#syncLink').onclick=async()=>{
+  const out=$('#syncLinkOut');
+  if(!syncTok){syncStatus('Turn on sync first, then make the link.',true);return}
+  out.value=location.href.split(/[?#]/)[0]+'?sync='+encodeURIComponent(syncTok);out.hidden=false;
+  try{await navigator.clipboard.writeText(out.value);syncStatus('Link copied. Open it on your phone, then add the app to the Home Screen from there.')}
+  catch(e){out.focus();out.select();syncStatus('Select and copy the link, then open it on your phone.')}
 };
 $('#syncNow').onclick=()=>{if(!syncTok){syncStatus('Paste your token and press “Turn on sync” first.',true);return}syncNow(false)};
 $('#syncShow').onchange=e=>{$('#syncTok').type=e.target.checked?'text':'password'};
