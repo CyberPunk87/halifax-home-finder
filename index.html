@@ -51,6 +51,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .leaflet-popup-content button{margin:4px 6px 0 0;padding:5px 9px;font:inherit;cursor:pointer;border-radius:5px;border:1px solid var(--ink);background:#fff}
 .bmlink{display:inline-block;padding:8px 12px;border-radius:6px;background:#d81b60;color:#fff;text-decoration:none;font-weight:600;cursor:grab}
 .sc{margin:8px 0 4px;padding-top:6px;border-top:1px solid #d5dde1;font-size:12.5px;color:#12263a}.scrow{display:flex;justify-content:space-between;gap:10px;margin:2px 0}.scrow span{color:#5d6f7e}.scrow b{text-align:right;font-weight:600}.scsub{color:#5d6f7e;font-size:12px;margin:0 0 4px}.scbad{color:#b3261e}.item .sumline{display:block;color:#12263a}
+.stpill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;margin-right:6px;background:#e3e9ed;color:#12263a}
+.st-contacted{background:#d7e8f7}.st-viewing{background:#fff1c2}.st-applied{background:#e1d7f5}.st-accepted{background:#cdeccf;color:#1b5e20}.st-passed{background:#ececec;color:#777}
+.stdate{font-size:12px;color:#5d6f7e}.stdate.soon{color:#b3261e;font-weight:700}
+.srow{display:flex;align-items:flex-start;gap:8px;border-top:1px solid var(--line)}.srow .item{border-top:0;flex:1}.srow.dim .item{opacity:.55}
+.srow input[type=checkbox]{width:22px;height:22px;margin:12px 0 0;flex:none}
+.stbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}.stbar select{width:auto;flex:1;min-width:120px}.stbar button{margin:0}
+.cmpwrap{overflow-x:auto;margin:10px 0;border:1px solid var(--line);border-radius:8px}
+table.cmp{border-collapse:collapse;font-size:12.5px;width:100%}table.cmp th,table.cmp td{padding:6px 8px;border-top:1px solid var(--line);text-align:left;vertical-align:top;min-width:105px}
+table.cmp td:first-child,table.cmp th:first-child{position:sticky;left:0;background:#f4f7f9;min-width:92px;font-weight:600;color:#5d6f7e}
+table.cmp td.best{background:#e3f4e4;font-weight:700;color:#1b5e20}table.cmp small{color:#5d6f7e;font-weight:400}
 .famlink{display:block;margin:16px 0 4px;padding:10px 12px;border:1px solid var(--ink);border-radius:8px;color:var(--ink);text-decoration:none;font-weight:600}
 .wxok{font-size:12px;color:var(--mute);margin:2px 0 8px}.wxok a{color:inherit}
 .wxa{border-radius:8px;margin:0 0 6px;font-size:13px;overflow:hidden}.wxa summary{padding:7px 10px;font:700 13px/1.4 system-ui,-apple-system,sans-serif;cursor:pointer}
@@ -135,6 +145,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="msg">If your phone keeps forgetting the token, open this link on the phone and add the app to the Home Screen from there. The link carries the token, so it comes back by itself. It is secret: send it only to your own phone (for example by AirDrop or a note to yourself), never post or forward it.</div>
     <div class="msg" id="syncMsg"></div>
     <a class="famlink" href="family.html">👨‍👩‍👧 Family page: check-ins, live location, emergency →</a>
+    <div class="stbar"><select id="stFilter" aria-label="Show homes by status"></select><button class="act alt" id="cmpGo">Compare ticked homes</button></div>
+    <div class="msg">Tick 2 to 4 saved homes, then press Compare.</div>
+    <div id="cmpOut"></div>
     <div id="saved"></div>
   </section>
 
@@ -298,11 +311,29 @@ document.querySelectorAll('[data-cat]').forEach(cb=>cb.addEventListener('change'
 }));
 
 /* ---------- Homes ---------- */
+/* ---------- Home status ---------- */
+const STATUS=[['none','Not contacted yet'],['contacted','Contacted'],['viewing','Viewing booked'],['applied','Applied'],['accepted','Accepted / got it'],['passed','Passed / rejected']];
+const stLabel=k=>(STATUS.find(x=>x[0]===k)||STATUS[0])[1];
+function whenInfo(w){
+  if(!w)return null;const d=new Date(w+'T12:00:00');if(isNaN(d))return null;
+  const t0=new Date();t0.setHours(12,0,0,0);const diff=Math.round((d-t0)/864e5);
+  const txt=d.toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'});
+  return {txt:diff===0?'today':diff===1?'tomorrow':txt,soon:diff>=0&&diff<=2,past:diff<0};
+}
+function stHtml(l){
+  const k=l.status||'none',w=whenInfo(l.when);
+  if(k==='none'&&!w)return '';
+  return '<span>'+(k!=='none'?`<span class="stpill st-${k}">${esc(stLabel(k))}</span>`:'')+(w?`<span class="stdate${w.soon?' soon':''}">${esc(w.txt)}${w.past?' (past)':''}</span>`:'')+'</span>';
+}
+function setStatus(id,v){const l=listings.find(x=>x.id===id);l.status=v;l.statusAt=Date.now();upd();render();markers[id]&&markers[id].openPopup()}
+function setWhen(id,v){const l=listings.find(x=>x.id===id);l.when=v;upd();render();markers[id]&&markers[id].openPopup()}
 function popupHtml(l){
   return `<b>${money(l.price,l.kind)}</b> · ${l.kind==='rent'?'Rental':'For sale'}${l.beds?' · '+esc(l.beds)+' bed':''}<br>${esc(l.addr)}
   ${l.link?`<br><a href="${esc(l.link)}" target="_blank" rel="noopener">Open original listing</a>`:''}
   <div class="sc" id="sc_${l.id}">Checking the neighbourhood… the first time takes a few seconds.</div>
   <div class="rt" id="rt_${l.id}"></div>
+  <label>Status</label><select onchange="setStatus('${l.id}',this.value)">${STATUS.map(x=>`<option value="${x[0]}"${(l.status||'none')===x[0]?' selected':''}>${x[1]}</option>`).join('')}</select>
+  <label>Date (viewing, deadline, reply by)</label><input type="date" value="${esc(l.when||'')}" onchange="setWhen('${l.id}',this.value)">
   <textarea rows="2" placeholder="Your notes" onchange="setNote('${l.id}',this.value)">${esc(l.note||'')}</textarea>
   <button onclick="toggleSave('${l.id}')">${l.saved?'Remove from shortlist':'Save to shortlist'}</button><button onclick="del('${l.id}')">Delete</button>`;
 }
@@ -314,10 +345,15 @@ function render(){
     m.bindPopup(()=>popupHtml(l),{minWidth:260,maxWidth:320,maxHeight:420});m.on('popupopen',()=>{fillScore(l);setupRoute(l)});markers[l.id]=m;
   });
   $('#count').textContent=shown.length?'('+shown.length+')':'';
-  const row=l=>`<button class="item" onclick="goTo('${l.id}')"><b><span class="pill" style="background:${COLOR[l.kind]}">${l.kind==='rent'?'Rent':'Buy'}</span>${money(l.price,l.kind)}</b><span>${esc(l.addr)}${l.beds?' · '+esc(l.beds)+' bed':''}</span><span class="sumline" data-sid="${l.id}">${esc(scoreCache[l.id]||'')}</span>${l.note?`<span><br>“${esc(l.note)}”</span>`:''}</button>`;
+  const row=l=>`<button class="item" onclick="goTo('${l.id}')"><b><span class="pill" style="background:${COLOR[l.kind]}">${l.kind==='rent'?'Rent':'Buy'}</span>${money(l.price,l.kind)}</b><span>${esc(l.addr)}${l.beds?' · '+esc(l.beds)+' bed':''}</span>${stHtml(l)}<span class="sumline" data-sid="${l.id}">${esc(scoreCache[l.id]||'')}</span>${l.note?`<span><br>“${esc(l.note)}”</span>`:''}</button>`;
   $('#list').innerHTML=shown.length?shown.map(row).join(''):'<div class="msg">No homes yet. Open “Add home” to put your first one on the map.</div>';
   const sv=listings.filter(l=>l.saved);
-  $('#saved').innerHTML=sv.length?sv.map(row).join(''):'<div class="msg">Nothing saved yet. Tap a pin and choose “Save to shortlist”.</div>';
+  const sf=$('#stFilter');
+  if(!sf.options.length){sf.innerHTML='<option value="all">Show all statuses</option>'+STATUS.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}
+  const fv=sf.value||'all',svf=sv.filter(l=>fv==='all'||(l.status||'none')===fv);
+  const ord=l=>l.when&&!(whenInfo(l.when)||{}).past?l.when:'9999';
+  svf.sort((a,b)=>ord(a)<ord(b)?-1:ord(a)>ord(b)?1:0);
+  $('#saved').innerHTML=svf.length?svf.map(l=>`<div class="srow${l.status==='passed'?' dim':''}"><input type="checkbox" data-cmp="${l.id}" aria-label="Compare this home"${cmpIds.includes(l.id)?' checked':''}>${row(l)}</div>`).join(''):`<div class="msg">${sv.length?'No saved homes with that status.':'Nothing saved yet. Tap a pin and choose “Save to shortlist”.'}</div>`;
 }
 function goTo(id){const l=listings.find(x=>x.id===id);if(!l)return;if(!markers[id]){$('#filter').value='all';render()}map.flyTo([l.lat,l.lon],16);setTimeout(()=>markers[id]&&markers[id].openPopup(),600)}
 function upd(){store('hx_listings',listings);touch()}
@@ -326,6 +362,45 @@ function toggleSave(id){const l=listings.find(x=>x.id===id);l.saved=!l.saved;upd
 function setNote(id,v){listings.find(x=>x.id===id).note=v;upd();render();markers[id]&&markers[id].openPopup()}
 function del(id){if(!confirm('Delete this home?'))return;listings=listings.filter(x=>x.id!==id);upd();map.closePopup();render()}
 $('#filter').addEventListener('change',render);
+$('#stFilter').addEventListener('change',render);
+let cmpIds=load('hx_cmp',[]);
+$('#saved').addEventListener('change',e=>{
+  const id=e.target.dataset&&e.target.dataset.cmp;if(!id)return;
+  cmpIds=cmpIds.filter(x=>x!==id);if(e.target.checked)cmpIds.push(id);store('hx_cmp',cmpIds);
+});
+$('#cmpGo').onclick=()=>compareHomes();
+async function compareHomes(){
+  const out=$('#cmpOut');
+  let hs=cmpIds.map(id=>listings.find(l=>l.id===id&&l.saved)).filter(Boolean);
+  if(hs.length<2){out.innerHTML='<div class="msg err">Tick at least two saved homes first.</div>';return}
+  const extra=hs.length>4;hs=hs.slice(-4);
+  out.innerHTML='<div class="msg">Comparing '+hs.length+' homes… the first time takes a few seconds.</div>';
+  const Rs=[];
+  try{for(const h of hs){const R=await computeScore(h);setSummary(h.id,R);Rs.push(R)}}
+  catch(e){console.error('Compare:',e);out.innerHTML='<div class="msg err">Couldn’t finish the comparison. Try again in a moment.</div>';return}
+  const near=k=>Rs.map(R=>R[k]&&R[k].v?{t:fmtD(R[k].v.d)+(R[k].v.name?'<br><small>'+esc(R[k].v.name)+'</small>':''),n:R[k].v.d}:{t:'—',n:null});
+  const same=hs.every(h=>h.kind===hs[0].kind);
+  const rows=[
+    ['Price',hs.map(h=>({t:esc(money(h.price,h.kind))+(same?'':'<br><small>'+(h.kind==='rent'?'rental':'for sale')+'</small>'),n:same?+h.price:null}))],
+    ['Bedrooms',hs.map(h=>({t:esc(h.beds||'—'),n:null}))],
+    ['Status',hs.map(h=>({t:(h.status&&h.status!=='none'?esc(stLabel(h.status)):'—')+(whenInfo(h.when)?'<br><small>'+esc(whenInfo(h.when).txt)+'</small>':''),n:null}))],
+    ['Reported incidents within '+SC_M+' m',Rs.map(R=>R.crime&&R.crime.v?{t:String(R.crime.v.n),n:R.crime.v.n}:{t:'—',n:null})],
+    ['Crime trend',Rs.map(R=>{const t=R.crime&&R.crime.v&&R.crime.v.ctx&&R.crime.v.ctx.trend;return t&&t.r+t.p>=8?{t:esc(fmtChange(pctChange(t.r,t.p))),n:pctChange(t.r,t.p)}:{t:'—',n:null}})],
+    ['Nearest bus route',near('bus')],['Nearest grocery',near('grocery')],['Nearest school',near('school')],
+    ['Nearest hospital',near('hospital')],['Nearest police',near('police')],['Nearest fire station',near('fire')],
+    ['Street closures within '+SC_CLOSE+' m',Rs.map(R=>R.closures&&R.closures.v?{t:String(R.closures.v.n),n:R.closures.v.n}:{t:'—',n:null})],
+    ['Future land use',Rs.map(R=>({t:R.land&&R.land.v&&R.land.v.vals.length?esc(R.land.v.vals.join(' · ')):'—',n:null}))],
+    ['Areas to avoid',Rs.map(R=>R.zone===null?{t:'none marked',n:null}:R.zone<=500?{t:'<span class="scbad">inside one</span>',n:0}:R.zone<=1500?{t:fmtD(R.zone-500)+' from one',n:R.zone}:{t:'none nearby',n:null})],
+    ['Your notes',hs.map(h=>({t:esc(h.note||'—'),n:null}))],
+    ['Listing',hs.map(h=>({t:h.link?`<a href="${esc(h.link)}" target="_blank" rel="noopener">Open</a>`:'—',n:null}))]
+  ];
+  const body=rows.map(([lab,vals])=>{
+    const ns=vals.map(v=>v.n).filter(n=>n!==null&&n!==undefined),lo=ns.length>1?Math.min(...ns):null;
+    const allSame=ns.length>1&&ns.every(n=>n===ns[0]);
+    return '<tr><td>'+esc(lab)+'</td>'+vals.map(v=>`<td${lo!==null&&!allSame&&v.n===lo?' class="best"':''}>${v.t}</td>`).join('')+'</tr>';
+  }).join('');
+  out.innerHTML=(extra?'<div class="msg">Showing the last 4 you ticked.</div>':'')+'<div class="cmpwrap"><table class="cmp"><tr><th></th>'+hs.map(h=>'<th>'+esc(h.addr)+'</th>').join('')+'</tr>'+body+'</table></div><div class="msg">Green marks the lowest number in a row (lowest price, fewest incidents, shortest distance). Incident counts are reports, not a safety rating.</div><button class="act alt" onclick="document.getElementById(\'cmpOut\').innerHTML=\'\'">Close comparison</button>';
+}
 
 /* ---------- Add a home ---------- */
 function setPending(lat,lon,text){
